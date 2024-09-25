@@ -359,6 +359,30 @@ end subroutine
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
 !+
+! Subroutine qp_wait_to_flush_basic(wait)
+!
+! Routine to signal to quick_plot whether to wait for flushing the plot buffer.
+! Note: By default, quick_plot is not in a wait state.
+!
+! Calls to this command should come in pairs. First a call with wait = True and
+! then a call with wait = False. Do not interleave these pairs with calls
+! to qp_save_state and qp_restore_state.
+!
+! Input:
+!   wait    -- logical: If True, go into a wait state for flushing.
+!                       If False, flush the buffer and go into a non-wait state.
+!-
+
+subroutine qp_wait_to_flush_basic(wait)
+implicit none
+logical wait
+!
+end subroutine qp_wait_to_flush_basic
+
+!-----------------------------------------------------------------------
+!-----------------------------------------------------------------------
+!-----------------------------------------------------------------------
+!+
 ! Subroutine qp_set_color_basic (ix_color)  
 !
 ! Subroutine to set the color taking into accout that GIF
