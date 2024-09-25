@@ -185,6 +185,7 @@ ENDIF ()
 # locations.)
 #-----------------------------------
 
+find_package(PkgConfig)
 find_package(X11)
 
 #-----------------------------------
@@ -498,6 +499,12 @@ foreach(h5dir ${HDF5_Fortran_INCLUDE_DIRS})
     list(APPEND MASTER_INC_DIRS "${h5dir}")
   endif()
 endforeach()
+
+# If using system FFTW, add include path to fftw module
+pkg_check_modules(fftw3 fftw3)
+if (fftw3_FOUND)
+  list(APPEND MASTER_INC_DIRS "${fftw3_INCLUDE_DIRS}")
+endif()
 
 #------------------------------------------------------
 # Add local include paths to search list if they exist
