@@ -485,8 +485,10 @@ SET (MASTER_INC_DIRS
   ${RELEASE_OUTPUT_BASEDIR}/modules
   ${RELEASE_OUTPUT_BASEDIR}/include
   ${ACC_INC_DIRS}
-  ${X11_INCLUDE_DIR}
 )
+if (NOT "$ENV{ACC_PLOT_PACKAGE}" MATCHES "none")
+  set (MASTER_INC_DIRS ${MASTER_INC_DIRS} ${X11_INCLUDE_DIR})
+endif()
 
 # If we use system HDF5 libraries, search for include directories
 find_package(HDF5 COMPONENTS Fortran)
@@ -1062,9 +1064,14 @@ foreach(exespec ${EXE_SPECS})
   TARGET_LINK_LIBRARIES(${EXENAME}-exe
     ${STATIC_FLAG} ${LINK_LIBS} 
     ${SHARED_FLAG} ${SHARED_LINK_LIBS} ${EXTRA_SHARED_LINK_LIBS}
-    ${X11_LIBRARIES} ${ACC_LINK_FLAGS} ${OPENMP_LINK_LIBS}
+  )
+  if (NOT "$ENV{ACC_PLOT_PACKAGE}" MATCHES "none")
+    target_link_libraries(${EXENAME}-exe ${X11_LIBRARIES})
+  endif()
+  target_link_libraries(${EXENAME}-exe
+    ${ACC_LINK_FLAGS} ${OPENMP_LINK_LIBS}
     ${LINK_FLAGS} ${MAPLINE} ${IMPLICIT_LINKER_LIBRARIES}
-    )
+  )
 
   SET(CFLAGS)
   SET(FFLAGS)
