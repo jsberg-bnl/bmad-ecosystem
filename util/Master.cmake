@@ -501,6 +501,7 @@ foreach(h5dir ${HDF5_Fortran_INCLUDE_DIRS})
 endforeach()
 
 # If using system FFTW, add include path to fftw module
+set(ENV{PKG_CONFIG_ALLOW_SYSTEM_CFLAGS} 1)
 pkg_check_modules(fftw3 fftw3)
 if (fftw3_FOUND)
   list(APPEND MASTER_INC_DIRS "${fftw3_INCLUDE_DIRS}")
