@@ -1982,7 +1982,8 @@ case ('data_parameter')
 !------------------------------------------------------------------------------------------------
 !%% data_set_design_value
 !
-! Set the design (and base & model) values for all datums.
+! Set the design (and base) values of all datums to the values as calculated for the design lattice.
+! This is useful for newly created datums that do not yet have the design and base values set.
 !
 ! Notes
 ! -----
@@ -2036,6 +2037,7 @@ case ('data_set_design_value')
     u%model%lat = u%scratch_lat
   enddo
 
+  call tao_var_repoint()
   s%u%calc%lattice = .true.
   call tao_lattice_calc (calc_ok)
 
@@ -2048,7 +2050,7 @@ case ('data_set_design_value')
 ! Notes
 ! -----
 ! Command syntax:
-!   pipe datum_create {datum_name}^^{data_type}^^{ele_ref_name}^^{ele_start_name}^^
+!   pipe datum_create {datum_name}^^{data_type}^^{ele_start_name}^^{ele_ref_name}^^
 !                       {ele_name}^^{merit_type}^^{meas}^^{good_meas}^^{ref}^^
 !                       {good_ref}^^{weight}^^{good_user}^^{data_source}^^
 !                       {eval_point}^^{s_offset}^^{ix_bunch}^^{invalid_value}^^
@@ -2066,8 +2068,8 @@ case ('data_set_design_value')
 ! ----------
 ! datum_name          ! EG: orb.x[3]
 ! data_type           ! EG: orbit.x
-! ele_ref_name : optional
 ! ele_start_name : optional
+! ele_ref_name : optional
 ! ele_name : optional
 ! merit_type : optional
 ! meas : default=0
