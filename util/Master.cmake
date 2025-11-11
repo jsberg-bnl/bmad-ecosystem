@@ -708,7 +708,7 @@ ELSE ()
     ADD_LIBRARY (${LIBNAME} STATIC ${sources})
     LIST (APPEND TARGETS ${LIBNAME})
     SET_TARGET_PROPERTIES (${LIBNAME} PROPERTIES OUTPUT_NAME ${LIBNAME})
-    target_link_libraries(${HDF5_TARGET})
+    target_link_libraries(${LIBNAME} ${HDF5_TARGET})
   ENDIF ()
 ENDIF ()
 
