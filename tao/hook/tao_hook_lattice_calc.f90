@@ -1,26 +1,25 @@
 !+
 ! Subroutine tao_hook_lattice_calc (calc_ok)
 !
-! This hook is used to do custom lattice calculations. This routine is only called if
-! the lattice needs to be recalculated. If this hook is used then set used to
-! TRUE or the standard lattice calculation will overwrite whatever you do here!
-! You have the option of only doing a custum lattice calculation for a
-! particular universe. In that case, only set used to TRUE when that universe is
-! passed.
+! This hook is used to do custom lattice calculations before any of the standard calculations
+! in the tao_lattice_calc routine.
 !
-! Tao_lattice_calc finds the lattice parameters and then calls
-! tao_load_data_array for every element as the beam is being tracked. If you do
-! custom tracking then be sure to also calculate the lattice parameters and
-! load the data arrays or TAO is liable to break!
+! See tao/code/tao_lattice_calc.f90 for how the standard lattice 
+! calculation is performed and how this routine is called.
 !
-! See tao/code/tao_lattice_calc_mod.f90 for how the standard lattice
-! calculation is performed. 
+! Also consider:
+!   tao_hook_calc_calc_post_process   ! Called at the end of tao_lattice_calc's universe loop.
+!   tao_hook_branch_calc
+!
+!
+! Input:
+!   calc_ok    -- logical: Current state of the lattice calculation.
 !
 ! Output:
 !   s%u(i)%universe_recalc 
-!              -- Logical: Set this to False to suppress tao_lattice_recalc.
-!   calc_ok    -- Logical: Set False if there was an error in the 
-!                   calculation like a particle was lost or a lat is unstable.
+!              -- logical: Set this to False to suppress tao_lattice_recalc.
+!   calc_ok    -- logical: Set False if there was an error in the calculation like a particle 
+!                   was lost or a lattice is unstable. Note to programmers: Do not set True.
 !-
 
 subroutine tao_hook_lattice_calc (calc_ok)

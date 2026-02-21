@@ -109,6 +109,7 @@ uni_loop: do iuni = lbound(s%u, 1), ubound(s%u, 1)
       tao_branch%chrom_calc_ok = .false.
       tao_branch%sigma_track_ok = .false.
       tao_branch%ix_ele_taylor = -1      ! Force tao_branch%taylor_save recalc.
+      tao_branch%ix_ref_taylor = -1
 
       u%model%tao_branch(:)%plot_cache_valid = .false.
       u%design%tao_branch(:)%plot_cache_valid = .false.
@@ -290,6 +291,8 @@ uni_loop: do iuni = lbound(s%u, 1), ubound(s%u, 1)
   endif  ! if (u%calc%lattice)
 
   ! Calculate non-expression data 
+
+  if (associated(tao_hook_universe_calc_post_process_ptr)) call tao_hook_universe_calc_post_process_ptr (u, tao_lat, calc_ok)
 
   do id = 1, size(u%data)
     if (substr(u%data(id)%data_type,1,11) == 'expression:') cycle

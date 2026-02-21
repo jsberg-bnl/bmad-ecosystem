@@ -454,7 +454,7 @@ type tao_data_struct
   real(rp) :: merit = 0                    ! Merit function term value: weight * delta_merit^2
   real(rp) :: s = real_garbage$            ! longitudinal position of ele.
   real(rp) :: s_offset = 0                 ! Offset of the evaluation point.
-  real(rp) :: s_ref_offset = 0             ! Offset of the reference point. In development.
+  real(rp) :: ref_s_offset = 0             ! Offset of the reference point. In development.
   logical :: err_message_printed = .false. ! Used to prevent zillions of error messages being generated
   logical :: exists = .false.              ! See above
   logical :: good_model = .false.          ! See above
@@ -931,7 +931,8 @@ type tao_lattice_branch_struct
   type (tao_plot_cache_struct), allocatable :: plot_cache(:)  ! Plotting data cache
   type (tao_spin_polarization_struct) spin
   type (summation_rdt_struct) srdt
-  type (coord_struct) orb0                                ! For saving beginning orbit
+  type (coord_struct) orb0                                ! For saving beginning orbit in closed geometry branches. 
+                                                          !   orb0 can then be used as an initial guess when closed_orbit is called again.
   type (normal_modes_struct) modes_ri                     ! Synchrotron integrals stuff
   type (normal_modes_struct) modes_6d                     ! 6D radiation matrices.
   type (ptc_normal_form_struct) ptc_normal_form           ! Collection of normal form structures defined in PTC
@@ -1184,12 +1185,16 @@ implicit none
 
 type (tao_lattice_branch_struct), intent(inout) :: tlb1(:)
 type (tao_lattice_branch_struct), intent(in) :: tlb2(:)
-integer i
+integer i, j
 
 !
 
 do i = 1, size(tlb1)
+  call kill_taylor(tlb1(i)%taylor_save)
   tlb1(i) = tlb2(i)
+  do j = 1, 6
+    tlb1(i)%taylor_save(j)%term => null()
+  enddo
 enddo
 
 end subroutine tao_lattice_branches_equal_tao_lattice_branches

@@ -195,7 +195,7 @@ logical show_sym, show_line, show_shape, print_data, ok, print_tail_lines, print
 logical show_all, name_found, print_taylor, print_rad, print_attributes, err_flag, angle_units, map_calc, clean
 logical print_ptc, force_use_ptc, called_from_pipe_cmd, print_eigen, show_mat, show_q, print_rms, do_inverse
 logical valid_value, print_floor, show_section, is_complex, print_header, print_by_uni, do_field, delim_found
-logical print_internal
+logical print_internal, has_radiation, has_elements
 logical, allocatable :: picked_uni(:), valid(:), picked2(:)
 logical, allocatable :: picked_ele(:)
 
@@ -730,8 +730,8 @@ case ('branch')
     nl=nl+1; write(lines(nl), '(a, i0)') 'For the lattice of universe: ', ix_u
   endif
 
-  nl=nl+1; lines(nl) = '                          N_ele  N_ele   Reference      Default_                      Live                Active'
-  nl=nl+1; lines(nl) = '  Branch                  Track    Max   Particle       Tracking_Species    Geometry  Branch  From_Fork   Fixer'
+  nl=nl+1; lines(nl) = '                          N_ele  N_ele   Reference      Default_                      Live                         Active'
+  nl=nl+1; lines(nl) = '  Branch                  Track    Max   Particle       Tracking_Species    Geometry  Branch  From_Fork            Fixer'
 
 
   fmt = '((i3, 2a), t26, i6, i7, t42, a, t57, a, t77, a, t87, l2, 6x, a, t116, a)'
@@ -831,7 +831,6 @@ case ('chromaticity')
     case default
       call out_io (s_error$, r_name, 'EXTRA STUFF ON LINE: ' // what2)
       return
-
     end select
   enddo
 
@@ -844,23 +843,23 @@ case ('chromaticity')
   endif
 
   tao_lat => tao_pointer_to_tao_lat (u, model$)
-  if (.not. u%calc%one_turn_map) call tao_ptc_normal_form (.true., tao_lat, ix_branch, rf_on = no$)
+  if (.not. u%calc%one_turn_map) call tao_ptc_normal_form (.true., tao_lat, ix_branch)
 
   bmad_nf => tao_branch%bmad_normal_form
   ptc_nf  => tao_branch%ptc_normal_form
 
-  nl=nl+1; lines(nl) = '  Note: Calculation is done with RF off.'
-  nl=nl+1; lines(nl) = '  N     chrom_ptc.a.N     chrom_ptc.b.N'
+  nl=nl+1; lines(nl) = '  N     chrom_ptc.a.N     chrom_ptc.b.N   (Note: 0th order are the tunes)'
 
   do i = 0, ptc_private%taylor_order_ptc-1
     expo = [0, 0, 0, 0, 0, i]
-    z1 =  real(ptc_nf%phase(1) .sub. expo)
-    z2 =  real(ptc_nf%phase(2) .sub. expo)
-    if (i == 0) then
-      nl=nl+1; write (lines(nl), '(i3, 2es18.7, a)') i, z1, z2, '  ! 0th order are the tunes'
+    if (ptc_nf%state%nocavity) then
+      z1 =  real(ptc_nf%phase(1) .sub. expo)
+      z2 =  real(ptc_nf%phase(2) .sub. expo)
     else
-      nl=nl+1; write (lines(nl), '(i3, 2es18.7)') i, z1, z2
+      z1 =  real(ptc_nf%u_phase(1) .sub. expo)
+      z2 =  real(ptc_nf%u_phase(2) .sub. expo)
     endif
+    nl=nl+1; write (lines(nl), '(i3, 2es18.7)') i, z1, z2
   enddo
 
   nl=nl+1; lines(nl) = ''
@@ -868,8 +867,13 @@ case ('chromaticity')
 
   do i = 1, ptc_private%taylor_order_ptc
     expo = [0, 0, 0, 0, 0, i]
-    z1 = -real(ptc_nf%phase(3) .sub. expo) / branch%param%total_length
-    z2 =  real(ptc_nf%path_length .sub. expo) / branch%param%total_length
+    if (ptc_nf%state%nocavity) then
+      z1 = -real(ptc_nf%phase(3) .sub. expo) / branch%param%total_length
+      z2 =  real(ptc_nf%path_length .sub. expo) / branch%param%total_length
+    else
+      z1 = -real(ptc_nf%u_phase(3) .sub. expo) / branch%param%total_length
+      z2 =  real(ptc_nf%u_path_length .sub. expo) / branch%param%total_length
+    endif
     nl=nl+1; write (lines(nl), '(i3, 2x, 2es18.7)') i, z1, z2
   enddo
 
@@ -1107,6 +1111,7 @@ case ('curve')
       value_min = 1e30
       valid = .false.
       do i = 1, n
+        if (.not. allocated(curve(i)%c%x_symb)) cycle
         if (ix_c(i) > size(curve(i)%c%x_symb)) cycle
         value(i) = curve(i)%c%x_symb(ix_c(i))
         valid(i) = .true.
@@ -5041,6 +5046,8 @@ case ('taylor_map', 'matrix')
   ele1_name = ''
   ele2_name = ''
   style = ''
+  has_radiation = .false.
+  has_elements = .false.
 
   if (show_what == 'matrix') then
     n_order = 1
@@ -5067,7 +5074,7 @@ case ('taylor_map', 'matrix')
       print_eigen = .true.
 
     case ('-elements')
-      output_type = 'ELEMENTS'
+      has_elements = .true.
       call tao_next_word(what2, ele_name)
       if (n_order == -1) n_order = 1
 
@@ -5093,7 +5100,7 @@ case ('taylor_map', 'matrix')
       force_use_ptc = .true.
 
     case ('-radiation')
-      output_type = 'RADIATION'
+      has_radiation = .true.
 
     case ('-s')
       where = "S_LOC"
@@ -5129,12 +5136,12 @@ case ('taylor_map', 'matrix')
 
   if (n_order == -1) n_order = ptc_private%taylor_order_ptc
 
-  if (where == "ELE_LIST" .and. output_type == "RADIATION") then
+  if (where == "ELE_LIST" .and. has_radiation) then
     nl=1; lines(1) = 'ERROR: "-radiation" AND "-elements" SWITCHES CANNOT BOTH BE PRESENT.'
     return
   endif
 
-  if (where == "S_LOC" .and. output_type == "RADIATION") then
+  if (where == "S_LOC" .and. has_radiation) then
     nl=1; lines(1) = 'ERROR: "-radiation" AND "-s" SWITCHES CANNOT BOTH BE PRESENT.'
     return
   endif
@@ -5253,7 +5260,7 @@ case ('taylor_map', 'matrix')
     !---------------------------------------
     ! Radiation
 
-  if (output_type == 'RADIATION') then
+  if (has_radiation) then
     if (.not. s%global%rf_on) then
       nl=nl+1; lines(nl) = 'Note: RF IS TURNED OFF!'
       nl=nl+1; lines(nl) = '   TO TURN ON USE: "set global rf_on = T"'
@@ -5314,7 +5321,7 @@ case ('taylor_map', 'matrix')
 
   ! Print results
 
-  if (output_type == 'ELEMENTS') THEN
+  if (has_elements) then
     call tao_locate_elements (ele_name, u%ix_uni, eles, err)
     if (err .or. size(eles) == 0) return
 
@@ -5556,16 +5563,16 @@ case ('track')
     call track1 (tao_branch%orbit(ele%ix_ele-1), ele, ele%branch%param, orb2, track, err)
     call re_allocate(lines, nl+track%n_pt+10)
 
-    nl=nl+1; lines(nl) = '                      |                 Tracked particle (Laboratory Coordinates)                     |         Strong Beam (Lab Coords)                            | Particle - Beam distance'
-    nl=nl+1; lines(nl) = '     s_lab     s_body |       x            px           y            py           z            pz     | slice     x_center     y_center      x_sigma      y_sigma   |         dx           dy'
+    nl=nl+1; lines(nl) = '                      |                                         Tracked particle (Laboratory Coordinates)                                             |         Strong Beam (Lab Coords)                            | Particle - Beam distance'
+    nl=nl+1; lines(nl) = '     s_lab     s_body |               x                    px                   y                    py                   z                    pz     | slice     x_center     y_center      x_sigma      y_sigma   |         dx           dy'
 
     do i = 0, track%n_pt
       tp => track%pt(i)
       sb => tp%strong_beam
       if (sb%ix_slice == 0) then
-        nl=nl+1; write (lines(nl), '(2f11.6, 1x, 6es13.5)') tp%s_lab, tp%s_body, tp%orb%vec
+        nl=nl+1; write (lines(nl), '(2f11.6, 1x, 6es21.13)') tp%s_lab, tp%s_body, tp%orb%vec
       else
-        nl=nl+1; write (lines(nl), '(2f11.6, 1x, 6es13.5, i8, 2x, 4es13.5, 2x, 2es13.5)') tp%s_lab, tp%s_body, tp%orb%vec, &
+        nl=nl+1; write (lines(nl), '(2f11.6, 1x, 6es21.13, i8, 2x, 4es13.5, 2x, 2es13.5)') tp%s_lab, tp%s_body, tp%orb%vec, &
                                   sb%ix_slice, sb%x_center, sb%y_center, sb%x_sigma, sb%y_sigma, sb%dx, sb%dy
       endif
     enddo
@@ -5850,6 +5857,7 @@ case ('universe')
   nl=nl+1; write(lines(nl), amt) 'Used line(s) in lat file: ', quote(lat%use_name)
   nl=nl+1; write(lines(nl), amt) 'Lattice file name:        ', quote(lat%input_file_name)
   nl=nl+1; write(lines(nl), amt) 'Reference species:        ', species_name(branch%param%particle)
+  nl=nl+1; write(lines(nl), amt) 'Active Fixer:             ', branch%ele(branch%ix_fixer)%name
 
   if (species == ref_particle$ .or. species == anti_ref_particle$) then
     nl=nl+1; write(lines(nl), amt) 'Default tracking species: ', trim(species_name(species)), ' (', trim(species_name(default_tracking_species(branch%param))), ')'

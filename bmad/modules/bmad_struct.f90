@@ -9,7 +9,7 @@ use spline_mod
 use sim_utils
 use cubic_interpolation_mod
 
-use ptc_spin, only: genfield, fibre, layout, c_damap, c_normal_form, c_taylor, probe_8, internal_state, c_quaternion
+use ptc_spin, only: genfield, fibre, layout, c_damap, c_normal_form, c_taylor, c_universal_taylor, probe_8, internal_state, c_quaternion
 
 private next_in_branch
 
@@ -19,7 +19,7 @@ private next_in_branch
 ! IF YOU CHANGE THE LAT_STRUCT OR ANY ASSOCIATED STRUCTURES YOU MUST INCREASE THE VERSION NUMBER !!!
 ! THIS IS USED BY BMAD_PARSER TO MAKE SURE DIGESTED FILES ARE OK.
 
-integer, parameter :: bmad_inc_version$ = 350
+integer, parameter :: bmad_inc_version$ = 355
 
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -206,6 +206,9 @@ character(12), parameter :: multipass_ref_energy_name(0:1) = [character(12):: 'U
 integer, parameter :: highland$ = 2, lynch_dahl$ = 3
 character(12), parameter :: scatter_method_name(3) = [character(12):: 'Off', 'Highland', 'Lynch_Dahl']
 
+integer, parameter :: not_allowed$ = 1, straight_reference$ = 2, bends_reference$ = 3
+character(20), parameter :: k0l_status_name(3) = [character(20):: 'Not_Allowed', 'Straight_Reference', 'Bends_Reference']
+
 !-------------------------------------------------------------------------
 ! Structure for holding the photon reflection probability tables.
 ! Used for both smooth surface reflections and custom crystal reflections.
@@ -360,9 +363,10 @@ character(12), parameter :: anchor_pt_name(0:3) = ['GARBAGE! ', 'Beginning', 'Ce
 
 ! Note: upstream_end$ = entrance_end$ & downstream_end$ = exit_end$ for ele with %orientation = 1.
 
-! first_track_edge$ is the edge a particle enters the element at. 
+! first_track_edge$ is the edge a particle enters the element when tracking. 
 ! This edge will depend upon whether a particle is moving in +s or -s direction.
 ! Similarly, second_track_edge$ is the edge a particle leaves the element at.
+
 
 integer, parameter :: none_pt$ = 4
 integer, parameter :: entrance_end$ = 1, exit_end$ = 2, both_ends$ = 3, no_end$ = 4, no_aperture$ = 4, nowhere$ = 4
@@ -934,8 +938,7 @@ integer, parameter :: s_position_group$ = 4, ref_energy_group$ = 5, mat6_group$ 
 integer, parameter :: rad_int_group$ = 7, all_groups$ = 8, s_and_floor_position_group$ = 9
 
 ! The bookkeeping_state_struct is used for keeping track of what bookkeeping has
-! been done on an element. NOTE: The information in this structure is ignored if 
-! bmad_com%auto_bookkeeper = True which is the default.
+! been done on an element.
 ! See the Bmad manual for more details.
 
 type bookkeeping_state_struct
@@ -1313,9 +1316,9 @@ end type
 ! Element RF parameter struct.
 ! rf_ele_struct%steps(0:N+1) is and array of steps from zero to N+1 where N = ele%value(n_rf_steps$).
 ! A single step is a drift followed by an energy kick.
-! Note:
-!   The last (N+1)th step is a "phantom" with no kick.
-! The end kicks are at the ends of the active region with region length = n_cell * wavelength/2
+! The last (N+1)th step is a "phantom" with no kick.
+! The active region where there is field has length = ele%value(n_cell$) * wavelength/2
+! The "end kicks" are the kicks at the ends of the active region
 ! The end kicks are half of the interior kicks.
 ! Note: ele%rf is not allocated for slice and super slaves.
 
@@ -1589,6 +1592,9 @@ type ptc_normal_form_struct
   type (c_taylor) path_length                ! Path length map. Gives momentum compaction.
   type (c_taylor) spin_tune                  ! Amplitude dependent spin tune 
   type (c_quaternion) isf                    ! Invariant spin field in (x, px, ...) space.
+  type (c_normal_form) u_normal_form         ! Complex normal form
+  type (c_universal_taylor) u_dispersion(4), u_phase(3), u_spin_tune   ! Used when there is RF.
+  type (c_taylor) u_path_length              ! Path length map. Used when there is RF.
   type (internal_state) state                ! PTC state
   logical :: valid_map = .false.
 end type
@@ -1663,6 +1669,7 @@ type lat_struct
   integer :: creation_hash = 0                              ! Set by bmad_parser. creation_hash will vary if 
                                                             !   any of the lattice files are modified.
   integer :: ramper_slave_bookkeeping = stale$
+  logical :: parser_make_xfer_mats = .true.                 ! Is Bmad parser to make element transfer matrices?
 end type
 
 character(2), parameter :: coord_name(6) = ['x ', 'px', 'y ', 'py', 'z ', 'pz']
@@ -1770,7 +1777,8 @@ integer, parameter :: radius$ = 3, focal_strength$ = 5
 integer, parameter :: l$ = 1                          ! Assumed unique. Do not assign 1 to another attribute.
 integer, parameter :: tilt$ = 2, roll$ = 2, n_part$ = 2, inherit_from_fork$ = 2 ! Important: tilt$ = roll$
 integer, parameter :: ref_tilt$ = 3, direction$ = 3, repetition_frequency$ = 3, deta_ds_master$ = 3, &
-                      kick$ = 3, x_gain_err$ = 3, taylor_order$ = 3, r_solenoid$ = 3, final_charge$ = 3
+                      kick$ = 3, x_gain_err$ = 3, taylor_order$ = 3, r_solenoid$ = 3, final_charge$ = 3, &
+                      k0l_status$ = 3, warn_count$ = 3
 integer, parameter :: k1$ = 4, kx$ = 4, harmon$ = 4, h_displace$ = 4, y_gain_err$ = 4, s_twiss_ref$ = 4, &
                       critical_angle_factor$ = 4, tilt_corr$ = 4, ref_coords$ = 4, dt_max$ = 4, ix_fixer$ = 4
 integer, parameter :: graze_angle$ = 5, k2$ = 5, b_max$ = 5, v_displace$ = 5, gradient_tot$ = 5, harmon_master$ = 5, &
@@ -1789,7 +1797,7 @@ integer, parameter :: spin_fringe_on$ = 13, pendellosung_period_sigma$ = 13
 integer, parameter :: sig_x$ = 14, exact_multipoles$ = 14, pendellosung_period_pi$ = 14
 integer, parameter :: sig_y$ = 15, graze_angle_in$ = 15, r0_elec$ = 15, rf_frequency$ = 15
 integer, parameter :: sig_z$ = 16, graze_angle_out$ = 16, r0_mag$ = 16, rf_wavelength$ = 16
-integer, parameter :: sig_vx$ = 17, static_linear_map$ = 17
+integer, parameter :: sig_vx$ = 17
 ! longitudinal_mode$ is near to rf_wavelength$ for type_ele to print rf_bucket_length near rf_wavelength$
 integer, parameter :: sig_vy$ = 18, constant_ref_energy$ = 18, ks$ = 18
 integer, parameter :: sig_e$ = 19, sig_pz$ = 19, autoscale_amplitude$ = 19
@@ -1876,39 +1884,41 @@ integer, parameter :: check_sum$ = 75
 
 !!    = 1 + num_ele_attrib$
 
+integer, parameter :: is_on$ = 79
+integer, parameter :: alias$  = 80
 integer, parameter :: distribution$ = 81
 integer, parameter :: tt$ = 81, x_knot$ = 81
-integer, parameter :: alias$  = 82, max_fringe_order$ = 82, eta_x$ = 82
+integer, parameter :: max_fringe_order$ = 82, eta_x$ = 82
 integer, parameter :: electric_dipole_moment$ = 83, lr_self_wake_on$ = 83, x_ref$ = 83, species_out$ = 83
 integer, parameter :: y_knot$ = 83, eta_y$ = 83, density$ = 83
 integer, parameter :: lr_wake_file$ = 84, px_ref$ = 84, etap_x$ = 84, slave$ = 84, &
-                      density_used$ = 84
+                      density_used$ = 84, parser_make_xfer_mats$ = 84
 integer, parameter :: lr_freq_spread$ = 85, y_ref$ = 85, etap_y$ = 85, &
                       area_density$ = 85, input_ele$ = 85
 integer, parameter :: lattice$ = 86, phi_a$ = 86, multipoles_on$ = 86, py_ref$ = 86, &
                       area_density_used$ = 86, output_ele$ = 86
 integer, parameter :: aperture_type$ = 87, eta_z$ = 87, machine$ = 87
 integer, parameter :: taylor_map_includes_offsets$ = 88, pixel$ = 88, p88$ = 88, radiation_length$ = 88, deta_dpz_x$ = 88
-integer, parameter :: csr_method$ = 89, var$ = 89, z_ref$ = 89, p89$ = 89, radiation_length_used$ = 89, deta_dpz_y$ = 89
+integer, parameter :: csr_method$ = 89, var$ = 89, z_ref$ = 89, p89$ = 89, radiation_length_used$ = 89
 
 integer, parameter :: pz_ref$ = 90, space_charge_method$ = 90, p90$ = 90, detap_dpz_x$ = 90
-integer, parameter :: mat6_calc_method$ = 91, detap_dpz_y$ = 91
-integer, parameter :: tracking_method$  = 92, s_long$ = 92
+integer, parameter :: mat6_calc_method$ = 91
+integer, parameter :: tracking_method$  = 92
 integer, parameter :: ref_time$ = 93, ptc_integration_type$ = 93
 integer, parameter :: spin_tracking_method$ = 94, eta_a$ = 94
-integer, parameter :: aperture$ = 95, etap_a$ = 95
-integer, parameter :: x_limit$ = 96, absolute_time_tracking$ = 96, eta_b$ = 96
+integer, parameter :: aperture$ = 95, etap_a$ = 95, deta_dpz_y$ = 95
+integer, parameter :: x_limit$ = 96, absolute_time_tracking$ = 96, eta_b$ = 96, detap_dpz_y$ = 96
 integer, parameter :: y_limit$ = 97, etap_b$ = 97
 integer, parameter :: offset_moves_aperture$ = 98
 integer, parameter :: alpha_a$ = 99, reflectivity_table$ = 99, energy_probability_curve$ = 99
 
 integer, parameter :: exact_misalign$ = 100, physical_source$ = 100
 integer, parameter :: sr_wake_file$ = 100, alpha_b$ = 100
-integer, parameter :: term$ = 101, frequencies$ = 101, old_integrator$ = 101, curvature$ = 101
+integer, parameter :: term$ = 101, frequencies$ = 101, old_integrator$ = 101, curvature$ = 101, s_long$ = 101
 integer, parameter :: x_position$ = 102, exact_model$ = 102
 integer, parameter :: symplectify$ = 103, y_position$ = 103, n_slice_spline$ = 103
 integer, parameter :: z_position$ = 104, amp_vs_time$ = 104
-integer, parameter :: is_on$ = 105, theta_position$ = 105, vertical_kick$ = 105
+integer, parameter :: theta_position$ = 105, vertical_kick$ = 105
 integer, parameter :: field_calc$ = 106, phi_position$ = 106
 integer, parameter :: psi_position$ = 107, wall$ = 107
 integer, parameter :: aperture_at$ = 108, beta_a$ = 108
@@ -2188,7 +2198,7 @@ integer, parameter :: is_struct$ = 6, unknown$ = 7
 
 ! For coords_floor_to_curvilinear status argument
 
-integer, parameter :: patch_problem$ = 2, outside$ = 3, cannot_find$ = 4
+integer, parameter :: patch_problem$ = 2, cannot_find$ = 4, outside$ = 5
 
 ! extra_parsing_info_struct is used by parsing routines.
 ! %undeterministic_ran_function_called: Only set True when a ran function is called with ran_seed = 0
@@ -2305,7 +2315,7 @@ type bmad_common_struct
   logical :: rf_phase_below_transition_ref = .false.   ! Autoscale uses below transition stable point for RFCavities?
   logical :: sr_wakes_on = .true.                      ! Short range wakefields?
   logical :: lr_wakes_on = .true.                      ! Long range wakefields
-  logical :: auto_bookkeeper = .true.                  ! Automatic bookkeeping?
+  logical :: auto_bookkeeper = .true.                  ! Deprecated and no longer used.
   logical :: high_energy_space_charge_on = .false.     ! High energy space charge effect switch.
   logical :: csr_and_space_charge_on = .false.         ! Space charge switch.
   logical :: spin_tracking_on = .false.                ! spin tracking?

@@ -452,9 +452,6 @@ function tao_graph_name(graph, use_region) result (graph_name)
   logical, optional :: use_region
 end function
 
-subroutine tao_has_been_created ()
-end subroutine
- 
 subroutine tao_help (what1, what2, lines, n_lines)
   implicit none
   character(*) what1, what2
@@ -486,11 +483,6 @@ end subroutine
 subroutine tao_init_plotting (plot_file)
   implicit none
   character(*) plot_file
-end subroutine
-
-subroutine tao_init_single_mode (single_mode_file)
-  implicit none
-  character(*) single_mode_file
 end subroutine
 
 function tao_is_valid_name (name, why_invalid) result (is_valid)
@@ -783,8 +775,9 @@ subroutine tao_re_allocate_expression_info (info, n, exact)
   logical, optional :: exact
 end subroutine
 
-subroutine tao_regression_test ()
+subroutine tao_regression_test (cmd_str)
   implicit none
+  character(*) cmd_str
 end subroutine
 
 subroutine tao_remove_blank_characters (str)
@@ -1221,6 +1214,14 @@ subroutine tao_hook_show_cmd_def (what, result_id, lines, nl)
   integer nl
 end subroutine
 
+subroutine tao_hook_universe_calc_post_process_def (u, tao_lat, calc_ok)
+  import
+  implicit none
+  type (tao_universe_struct), target :: u
+  type (tao_lattice_struct), target :: tao_lat
+  logical calc_ok
+end subroutine
+
 end interface  ! abstract
 
 ! Function pointers
@@ -1244,6 +1245,7 @@ procedure(tao_hook_init1_def), pointer :: tao_hook_init1_ptr => null()
 procedure(tao_hook_init2_def), pointer :: tao_hook_init2_ptr => null()
 procedure(tao_hook_init_var_def), pointer :: tao_hook_init_var_ptr => null()
 procedure(tao_hook_lattice_calc_def), pointer :: tao_hook_lattice_calc_ptr => null()
+procedure(tao_hook_universe_calc_post_process_def), pointer :: tao_hook_universe_calc_post_process_ptr => null()
 procedure(tao_hook_merit_data_def), pointer :: tao_hook_merit_data_ptr => null()
 procedure(tao_hook_merit_var_def), pointer :: tao_hook_merit_var_ptr => null()
 procedure(tao_hook_optimizer_def), pointer :: tao_hook_optimizer_ptr => null()

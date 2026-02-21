@@ -120,6 +120,11 @@ super_saved%ic1_lord = 0
 
 branch => lat%branch(ix_branch)
 
+if (l_super >= branch%param%total_length) then
+  call out_io (s_abort$, r_name, 'Superposition of element of length greater or equal to the branch length not allowed: ' // super_ele_in%name)
+  return
+endif
+
 ! s1 is the entrance edge of the superimpose.
 ! s2 is the exit edge of the superimpose.
 
@@ -163,6 +168,28 @@ if (logic_option(.true., wrap)) then
 
 else
   if (s1 < s1_lat_fudge .or. s2 > s2_lat_fudge) then
+    ! No wrap superimpose after a wrap superimpose in an open lattice does not make sense.
+    ! Check first non-zero length element to see if there has been a wrap
+    ele0 => branch%ele(1)
+    do
+      if (ele0%value(l$) /= 0) exit
+      ele0 => branch%ele(ele0%ix_ele+1)
+    enddo
+
+    if (ele0%slave_status == super_slave$) then
+      do i = 1, ele0%n_lord
+        lord => pointer_to_lord(ele0, i)
+        if (lord%lord_status /= super_lord$) cycle
+        slave => pointer_to_slave(lord, 1)
+        if (slave%ix_ele == ele0%ix_ele) cycle
+        call out_io (s_error$, r_name, &
+              'SUPERIMPOSE (' // trim(super_saved%name) // ') WITH WRAP_SUPERIMPOSE = FALSE', &
+              'AFTER A SUPERPOSITION (' // trim(lord%name) // ') WITH WRAP_SUPERIMPOSE = TRUE (THE DEFAULT)', &
+              'IS TOO CONFUSING AND NOT PERMITTED.')
+        return
+      enddo
+    endif
+
     if (branch%param%geometry == closed$) call out_io (s_warn$, r_name, &
            'Superimpose is not being wrapped around a closed lattice for: ' // super_saved%name, &
            'Set "wrap_superimpose = True" if you do not want this.')

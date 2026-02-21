@@ -631,12 +631,33 @@ branch_loop: do i_b = 0, ubound(lat%branch, 1)
       endif
     endif
 
-    ! Zero length cavity is verboten
+    !
 
-    if (ele%key == lcavity$ .and. ele%value(l$) == 0) then
+    if (ele%key == lcavity$ .and. ele%value(l$) > 0 .and. ele%value(l$) < 1d-3) then
       call out_io (s_fatal$, r_name, &
                     'ELEMENT: ' // ele_full_name(ele, '@N (&#)'), &
-                    'WHICH IS AN LCAVITY HAS ZERO LENGTH WHICH GIVES AN INFINITE GRADIENT.')
+                    'IS A LCAVITY WITH A SMALL (< 1 mm) BUT FINITE LENGTH. THIS CAN LEAD TO PROBLEMS WITH TRACKING.', &
+                    'EITHER MAKE THE CAVITY ZERO LENGTH OR SOMETHING LARGER THAN 1 mm.')
+      err_flag = .true.
+    endif
+
+    if (ele%key == lcavity$) then
+      select case (ele%tracking_method)
+      case (symp_lie_ptc$, runge_kutta$, time_runge_kutta$)
+        if (ele%value(l_active$) == 0) then
+          call out_io (s_fatal$, r_name, &
+                    'ELEMENT: ' // ele_full_name(ele, '@N (&#)'), &
+                    'WHICH IS A LCAVITY HAS ZERO ACTIVE LENGTH WHICH MEANS THAT INTEGRATION TRACKING_METHODS', &
+                    'LIKE SYMP_LIE_PTC, RUNGE_KUTTA, OR TIME_RUNGE_KUTTA ARE NOT VALID.')
+        endif
+      end select
+    endif
+
+    if (ele%key == lcavity$ .and. ele%value(l$) == 0 .and. nint(ele%value(cavity_type$)) == standing_wave$) then
+      call out_io (s_fatal$, r_name, &
+                    'ELEMENT: ' // ele_full_name(ele, '@N (&#)'), &
+                    'WHICH IS A STANDING_WAVE LCAVITY HAS ZERO LENGTH WHICH GIVES AN INFINITE PONDERMOTIVE KICK.', &
+                    'SWITCH TO "CAVITY_TYPE = TRAVELING_WAVE" IF YOU REALLY WANT A ZERO LENGTH CAVITY.')
       err_flag = .true.
     endif
 
@@ -825,13 +846,14 @@ branch_loop: do i_b = 0, ubound(lat%branch, 1)
       endif
     endif
 
-    ! K0L for a multipole is problematic so disallow
+    ! K0L for a multipole can be problematic
 
     if (ele%key == multipole$ .and. associated(ele%a_pole)) then
-      if (ele%a_pole(0) /= 0) then
+      if (ele%a_pole(0) /= 0 .and. nint(ele%value(k0l_status$)) == not_allowed$) then
         call out_io (s_fatal$, r_name, &
-                  'MULTIPOLE: ' // ele_full_name(ele, '@N (&#)'), &
-                  'CANNOT HAVE A FINITE K0L VALUE. SEE THE BMAD MANUAL FOR DETAILS.')
+                'MULTIPOLE: ' // ele_full_name(ele, '@N (&#)'), &
+                ' CANNOT HAVE A FINITE K0L VALUE UNLESS K0L_STATUS IS SET TO BENDS_REFERENCE OR STRAIGHT_REFERENCE.', &
+                ' SEE THE BMAD MANUAL FOR DETAILS.')
         err_flag = .true.
       endif
     endif
@@ -1335,7 +1357,7 @@ branch_loop: do i_b = 0, ubound(lat%branch, 1)
         ds = s2 - s1
         ds_small = ds_small * max(abs(s1), abs(s2)) 
       else
-        ds = (branch%param%total_length - s1) + s2
+        ds = (slave%branch%param%total_length - s1) + s2
         ds_small = ds_small * max(abs(s1), abs(s2), branch%param%total_length)
       endif 
       l_lord = ele%value(l$) + ele%value(lord_pad2$) + ele%value(lord_pad1$)

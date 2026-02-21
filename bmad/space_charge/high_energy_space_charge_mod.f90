@@ -8,32 +8,36 @@ contains
 !---------------------------------------------------------------------
 !---------------------------------------------------------------------
 !+
-! Subroutine setup_high_energy_space_charge_calc (calc_on, branch, n_part, mode, closed_orb)
+! Subroutine setup_high_energy_space_charge_calc (calc_on, branch, n_part, mode, beam_init, closed_orb)
 !
 ! Routine to initialize constants needed by the ultra relativistic space charge 
 ! tracking routine track1_high_energy_space_charge. This setup routine must be called if 
 ! the lattice or any of the other input parameters are changed.
 !
+! Parameters used:
+!     a-mode emittance
+!     b-mode emittance
+!     sig_z bunch length
+!     sig_pz relative energy spread
+!
 ! Input:
-!   calc_on    -- Logical: Turns on or off the space charge calculation.
-!   branch     -- branch_struct: Lattice for tracking.
-!   n_part     -- Real(rp): Number of actual particles in a bunch. Used to compute the bunch charge.
-!   mode       -- normal_modes_struct: Structure holding the beam info.
-!     %a%emittance  -- a-mode unnormalized emittance.
-!     %b%emittance  -- b-mode unnormalized emittance.
-!     %sig_z        -- Real(rp): Bunch length.
-!     %sigE_E       -- Real(rp): Sigma_E/E relative energy spread
-!   closed_orb(0:) -- Coord_struct, optional: Closed orbit. If not present
-!                       the closed orbit is taken to be zero. 
+!   calc_on         -- Logical: Turns on or off the space charge calculation.
+!   branch          -- branch_struct: Lattice for tracking.
+!   n_part          -- Real(rp): Number of actual particles in a bunch. Used to compute the bunch charge.
+!   mode            -- normal_modes_struct: Structure holding the beam info. Will be combined with info in beam_init.
+!   beam_init       -- beam_init_struct, optional: Structure holding beam info. Will be combined with info in mode.
+!   closed_orb(0:) -- Coord_struct, optional: Closed orbit. If not present the closed orbit is taken to be zero. 
 !-
 
-subroutine setup_high_energy_space_charge_calc (calc_on, branch, n_part, mode, closed_orb)
+subroutine setup_high_energy_space_charge_calc (calc_on, branch, n_part, mode, beam_init, closed_orb)
 
 implicit none
 
 type (branch_struct), target :: branch
 type (coord_struct), optional :: closed_orb(0:)
-type (normal_modes_struct) mode
+type (beam_init_struct), optional :: beam_init
+type (beam_init_struct) b_init
+type (normal_modes_struct) mode, mode2
 type (high_energy_space_charge_struct), pointer :: sc
 type (ele_struct), pointer :: ele
 type (twiss_struct), pointer :: a, b
@@ -51,10 +55,20 @@ bmad_com%high_energy_space_charge_on = calc_on
 
 if (present(closed_orb)) then
   mc2 = mass_of(closed_orb(0)%species)
-  q2 = charge_of(closed_orb(0)%species)
+  q2 = charge_of(closed_orb(0)%species)**2
 else
   mc2 = mass_of(branch%param%particle)
-  q2 = charge_of(branch%param%particle)
+  q2 = charge_of(branch%param%particle)**2
+endif
+
+if (present(beam_init)) then
+  b_init = beam_init_setup(beam_init, branch%ele(0), branch%ele(0)%ref_species, mode)
+  mode2%sig_z       = b_init%sig_z
+  mode2%sigE_E      = b_init%sig_pz
+  mode2%a%emittance = b_init%a_emit
+  mode2%b%emittance = b_init%b_emit
+else
+  mode2 = mode
 endif
 
 ! Loop over all branch elements
@@ -65,9 +79,9 @@ do i = 1, branch%n_ele_track
   if (.not. associated(ele%high_energy_space_charge)) allocate(ele%high_energy_space_charge)
   sc => ele%high_energy_space_charge
 
-  sc%sig_z = mode%sig_z
+  sc%sig_z = mode2%sig_z
 
-! Save the reference closed orbit.
+  ! Save the reference closed orbit.
 
   if (present(closed_orb)) then
     sc%closed_orb = closed_orb(i)
@@ -75,10 +89,10 @@ do i = 1, branch%n_ele_track
     sc%closed_orb%vec = 0
   endif
 
-! Due to coupling the beam ellipse may be rotated in the x-y plane.
-! phi is this rotation angle.
-! In the rotated frame the beam, by construction is decoupled.
-! sc%sig_x and sc%sig_y are the x and y sigmas in the rotated frame.
+  ! Due to coupling the beam ellipse may be rotated in the x-y plane.
+  ! phi is this rotation angle.
+  ! In the rotated frame the beam, by construction is decoupled.
+  ! sc%sig_x and sc%sig_y are the x and y sigmas in the rotated frame.
 
   c11 = ele%c_mat(1,1); c12 = ele%c_mat(1,2); c22 = ele%c_mat(2,2)
   a => ele%a
@@ -87,20 +101,20 @@ do i = 1, branch%n_ele_track
   y => ele%y
   g = ele%gamma_c
   g2 = ele%gamma_c**2
-  a_emit = mode%a%emittance
-  b_emit = mode%b%emittance
+  a_emit = mode2%a%emittance
+  b_emit = mode2%b%emittance
 
   xx_ave = g2 * a_emit * a%beta + b_emit * (c11**2 * b%beta - &
                    2 * c11 * c12 * b%alpha + c12**2 * b%gamma) + &
-                   (x%eta * mode%sigE_E)**2
+                   (x%eta * mode2%sigE_E)**2
 
   xy_ave = g * (a_emit * (-c22 * a%beta - c12 * a%alpha) + &
                 b_emit * ( c11 * b%beta - c12 * b%alpha)) + &
-                 x%eta * y%eta * mode%sigE_E**2
+                 x%eta * y%eta * mode2%sigE_E**2
 
   yy_ave = g2 * b_emit * b%beta + a_emit * (c22**2 * a%beta + &
                 2 * c22 * c12 * a%alpha + c12**2 * a%gamma) + &
-                (y%eta * mode%sigE_E)**2
+                (y%eta * mode2%sigE_E)**2
 
   phi = atan2(2 * xy_ave, xx_ave - yy_ave) / 2
 
@@ -115,24 +129,18 @@ do i = 1, branch%n_ele_track
   sc%sig_x = sqrt(xx_rot_ave)
   sc%sig_y = sqrt(yy_rot_ave)
 
-! The length over which the space charge acts is taken to be half 
-! the length of the element + half the length of the next element.
+  ! The length over which the space charge acts is taken to be half 
+  ! the length of the element + half the length of the next element.
 
   length = (ele%value(l$) + branch%ele(i+1)%value(l$)) / 2
   if (i == 1) length = ele%value(l$) + branch%ele(i+1)%value(l$) / 2
   if (i == branch%n_ele_track) length = ele%value(l$) / 2
 
-! Calculate the kick constant.
-! Taken from:
-!   W. Decking, R. Brinkmann
-!   "Space Charge Problems in the TESLA Damping Ring"
-!   EPAC 2000, Vienna.
-! The extra factor of 4pi comes from the normalization of 
-!   the bbi_kick routine used in track1_space_charge.
+  ! See the bbi_kick routine. 
 
   g3 = (ele%value(p0c$) / mc2)**3
   sc%kick_const = length * classical_radius_factor * n_part * q2 / &
-                   (sqrt(twopi**3) * g3 * mc2 * (sc%sig_x + sc%sig_y) * mode%sig_z)
+                   (sqrt(twopi**3) * g3 * mc2 * (sc%sig_x + sc%sig_y) * mode2%sig_z)
 
 enddo
 
@@ -167,7 +175,7 @@ type (ele_struct), target, intent(inout)  :: ele
 type (lat_param_struct), intent(inout) :: param
 type (high_energy_space_charge_struct), pointer :: sc
 
-real(rp) x, y, x_rel, y_rel, kx, ky
+real(rp) x, y, z, x_rel, y_rel, kx, ky
 real(rp) nk(2), dnk(2,2), kick_const
 
 ! Init
@@ -180,18 +188,19 @@ sc => ele%high_energy_space_charge
 
 x = orbit%vec(1) - sc%closed_orb%vec(1)
 y = orbit%vec(3) - sc%closed_orb%vec(3)
+z = orbit%vec(5) - sc%closed_orb%vec(5)
 
 x_rel =  x * sc%cos_phi + y * sc%sin_phi 
 y_rel = -x * sc%sin_phi + y * sc%cos_phi
 
-call bbi_kick (x_rel, y_rel, [sc%sig_y, sc%sig_x], nk, dnk)
+call bbi_kick (x_rel, y_rel, [sc%sig_x, sc%sig_y], nk, dnk)
 
 ! Transform the kick back to the lab coords and apply.
 
 kx = nk(1) * sc%cos_phi - nk(2) * sc%sin_phi
 ky = nk(1) * sc%sin_phi + nk(2) * sc%cos_phi
 
-kick_const = sc%kick_const * exp(-0.5 * (orbit%vec(5)/sc%sig_z)**2) / (1 + orbit%vec(6))**3
+kick_const = sc%kick_const * exp(-0.5 * (z/sc%sig_z)**2) / (1 + orbit%vec(6))**3
 
 ! The negative sign is due to the bbi kick assuming beams of opposite sign.
 

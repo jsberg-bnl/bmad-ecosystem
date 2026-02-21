@@ -18,18 +18,24 @@ use super_recipes_mod, only: super_zbrent, super_bracket_root
 implicit none
 
 type (ele_struct), target :: ele
-type (ele_struct), pointer :: lord
+type (ele_struct), pointer :: lord, ele2
 real(rp) field_scale, E_tot_final, x_range(2), t_final, delta_ref_time, dt_err
-integer nn, status, i
+integer nn, status, i, ix_slave
 logical err_flag
 
 character(*), parameter :: r_name = 'lcavity_rf_step_setup'
 
 !
 
+ele2 => ele   ! To get around ifort debug problem.
+
 nn = nint(ele%value(n_rf_steps$))
 if (nn < 1) return
-if (ele%slave_status == super_slave$ .or. ele%slave_status == slice_slave$) return
+if (ele%slave_status == super_slave$ .or. ele%slave_status == slice_slave$) then
+  lord => pointer_to_super_lord(ele, ix_slave_back = ix_slave)
+  call this_super_slave_rf_setup(ele, lord, ix_slave)
+  return
+endif
 
 !
 
@@ -54,7 +60,7 @@ endif
 
 if (ele%slave_status == multipass_slave$) then
   lord => pointer_to_lord(ele, 1)
-  call this_rf_multipass_slave_setup(ele, lord)
+  call this_multipass_slave_rf_setup(ele, lord)
 
 elseif (ele%lord_status == multipass_lord$) then
   ! The idea is that we want the kick reference times to have mirror symmetry to handle ERLs 
@@ -63,7 +69,7 @@ elseif (ele%lord_status == multipass_lord$) then
   ! Initial guess. If the reference energy gain is small compared to the voltage, accept
   ! the initial guess as a reasonable approximation.
 
-  call this_rf_free_ele_setup(ele)
+  call this_free_ele_rf_setup(ele)
   if (abs(ele%value(E_tot$) - ele%value(E_tot_start$)) < 0.01*ele%value(voltage$)) return
 
   ! Converge to a solution
@@ -74,7 +80,7 @@ elseif (ele%lord_status == multipass_lord$) then
   !! print *, 'dE_rel_err: ', this_dE_track(ele%value(field_autoscale$), status)
 
 else ! Not multipass
-  call this_rf_free_ele_setup(ele)
+  call this_free_ele_rf_setup(ele)
 endif
 
 !----------------------------------------------------------------------------------------------------
@@ -152,7 +158,7 @@ end function this_dE_track
 !----------------------------------------------------------------------------------------------------
 ! contains
 
-subroutine this_rf_free_ele_setup(ele)
+subroutine this_free_ele_rf_setup(ele)
 
 type (ele_struct), target :: ele
 type (branch_struct), pointer :: branch
@@ -203,12 +209,12 @@ ele%rf%steps(nn+1) = rf_stair_step_struct(ele%value(E_tot$), ele%value(E_tot$), 
 ele%ref_time = ele%value(ref_time_start$) + t
 ele%value(delta_ref_time$) = t
  
-end subroutine this_rf_free_ele_setup
+end subroutine this_free_ele_rf_setup
 
 !----------------------------------------------------------------------------------------------------
 ! contains
 
-subroutine this_rf_multipass_slave_setup(ele, lord)
+subroutine this_multipass_slave_rf_setup(ele, lord)
 
 type (ele_struct), target :: ele, lord
 type (ele_struct), pointer :: slave1
@@ -262,6 +268,57 @@ enddo
 ele%value(delta_ref_time$) = time_ref
 ele%ref_time = ele%value(ref_time_start$) + time_ref
 
-end subroutine this_rf_multipass_slave_setup
+end subroutine this_multipass_slave_rf_setup
+
+!----------------------------------------------------------------------------------------------------
+! contains
+
+subroutine this_super_slave_rf_setup(ele, lord, ix_slave)
+
+type (ele_struct), target :: ele, lord
+type (rf_stair_step_struct), pointer :: step
+real(rp) t, s_now, s_end, beta
+integer i0, i1, ix_step, ix_slave
+
+! It can happen that if the slave tracking_method is switched to bmad_standard, the lord has
+! not yet been setup.
+
+if (.not. associated(lord%rf)) call lcavity_rf_step_setup(lord)
+
+!
+
+if (ix_slave == 1) then
+  i0 = 0
+else
+  i0 = ele_rf_step_index(-1.0_rp, ele%s_start - lord%s_start, lord)
+endif
+
+if (ix_slave == lord%n_slave) then
+  i1 = ubound(lord%rf%steps, 1)
+else
+  i1 = ele_rf_step_index(-1.0_rp, ele%s - lord%s_start, lord)
+endif
+
+ele%value(E_tot$) = lord%rf%steps(i1)%E_tot0
+ele%value(p0c$) = lord%rf%steps(i1)%p0c
+
+t = 0
+s_now = ele%s_start - lord%s_start
+do ix_step = i0, i1
+  step => lord%rf%steps(ix_step)
+  if (ix_step == i1) then
+    s_end = ele%s - lord%s_start
+  else
+    s_end = step%s 
+  endif
+  beta = step%p0c / step%E_tot0
+  t = t + (s_end - s_now) / (c_light * beta)
+  s_now = s_end
+enddo
+
+ele%ref_time = ele%value(ref_time_start$) + t
+ele%value(delta_ref_time$) = t
+
+end subroutine this_super_slave_rf_setup
 
 end subroutine lcavity_rf_step_setup

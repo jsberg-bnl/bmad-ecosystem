@@ -62,7 +62,6 @@ type (taylor_struct), pointer :: taylor_ptr
 type (complex_taylor_struct), pointer :: complex_taylor_ptr
 type (all_pointer_struct) a_ptr
 type (rad_int_branch_struct), pointer :: branch_ri, branch_6d
-type (c_taylor), pointer :: phase_map
 type (twiss_struct), pointer :: z0, z1, z2
 type (tao_eval_node_struct), allocatable :: stack(:)
 
@@ -266,6 +265,27 @@ endif
 if (data_source == 'beam' .and. .not. s%com%have_tracked_beam) then
   call tao_set_invalid (datum, 'DATA_SOURCE FOR DATUM SET TO "beam". BUT NO BEAM TRACKING HAS BEEN DONE!', why_invalid, err_level = s_warn$, print_err = print_err)
   return
+endif
+
+!------------
+! Rad int calc needed
+
+if (data_source == 'lat') then
+  select case (head_data_type)
+  case ('rad_int.', 'apparent_emit.x', 'norm_apparent_emit.x', 'damp.', 'emit.', 'norm_emit.')
+    if (.not. tao_branch%rad_int_calc_ok .or. .not. tao_branch%emit_6d_calc_ok) then
+      if (.not. logic_option(.false., called_from_lat_calc)) then ! Try calling tao_lattice_calc.
+        s%com%force_rad_int_calc = .true.
+        u%calc%lattice = .true.
+        call tao_lattice_calc(ok)
+      endif
+
+      if (.not. tao_branch%rad_int_calc_ok .or. .not. tao_branch%emit_6d_calc_ok) then
+        call tao_set_invalid (datum, 'Radiation integral calc failed.', why_invalid, print_err = print_err)
+        return
+      endif
+    endif
+  end select
 endif
 
 !-------------------------------------------------------------
@@ -943,16 +963,6 @@ case ('chrom_ptc.')
     return
   endif
 
-  select case (data_type(1:12))
-  case ('chrom_ptc.a.')
-    phase_map => ptc_nf%phase(1)
-  case ('chrom_ptc.b.')
-    phase_map => ptc_nf%phase(2)
-  case default
-    call tao_set_invalid (datum, 'DATA_TYPE = "' // trim(data_type) // '" IS NOT VALID', why_invalid, .true., print_err = print_err)
-    return
-  end select
-
   if (.not. is_integer(data_type(13:), n)) then
     call tao_set_invalid (datum, 'DATA_TYPE = "' // trim(data_type) // '" IS NOT VALID', why_invalid, .true., print_err = print_err)
     return
@@ -961,7 +971,24 @@ case ('chrom_ptc.')
   expo = 0
   expo(6) = n 
 
-  datum_value = real(phase_map .sub. expo)
+  select case (data_type(1:12))
+  case ('chrom_ptc.a.')
+    if (ptc_nf%state%nocavity) then
+      datum_value = real(ptc_nf%phase(1) .sub. expo)
+    else
+      datum_value = real(ptc_nf%u_phase(1) .sub. expo)
+    endif
+  case ('chrom_ptc.b.')
+    if (ptc_nf%state%nocavity) then
+      datum_value = real(ptc_nf%phase(2) .sub. expo)
+    else
+      datum_value = real(ptc_nf%u_phase(2) .sub. expo)
+    endif
+  case default
+    call tao_set_invalid (datum, 'DATA_TYPE = "' // trim(data_type) // '" IS NOT VALID', why_invalid, .true., print_err = print_err)
+    return
+  end select
+
   valid_value = .true.
 
 !-----------
@@ -1712,7 +1739,12 @@ case ('momentum_compaction_ptc.')
   expo = 0
   expo(6) = n 
 
-  datum_value = real(ptc_nf%path_length .sub. expo) / branch%param%total_length
+  if (ptc_nf%state%nocavity) then
+    datum_value = real(ptc_nf%path_length .sub. expo) / branch%param%total_length
+  else
+    datum_value = real(ptc_nf%u_path_length .sub. expo) / branch%param%total_length
+  endif
+
   valid_value = .true.
 
 !-----------
@@ -2342,19 +2374,6 @@ case ('rad_int.')
 
   if (data_source == 'beam') goto 9000  ! Set error message and return
 
-  if (.not. tao_branch%rad_int_calc_ok .or. .not. tao_branch%emit_6d_calc_ok) then
-    if (.not. logic_option(.false., called_from_lat_calc)) then ! Try calling tao_lattice_calc.
-      s%com%force_rad_int_calc = .true.
-      u%calc%lattice = .true.
-      call tao_lattice_calc(ok)
-    endif
-
-    if (.not. tao_branch%rad_int_calc_ok .or. .not. tao_branch%emit_6d_calc_ok) then
-      call tao_set_invalid (datum, 'Radiation integral calc failed.', why_invalid, print_err = print_err)
-      return
-    endif
-  endif
-
   branch_ri => tao_lat%rad_int_by_ele_ri%branch(ix_branch)
   branch_6d => tao_lat%rad_int_by_ele_6d%branch(ix_branch)
 
@@ -2781,7 +2800,12 @@ case ('slip_factor_ptc.')
   expo = 0
   expo(6) = n 
 
-  datum_value = -real(ptc_nf%phase(3) .sub. expo) / branch%param%total_length
+  if (ptc_nf%state%nocavity) then
+    datum_value = -real(ptc_nf%phase(3) .sub. expo) / branch%param%total_length
+  else
+    datum_value = -real(ptc_nf%u_phase(3) .sub. expo) / branch%param%total_length
+  endif
+
   valid_value = .true.
 
 !-----------
@@ -2995,7 +3019,12 @@ case ('spin_map_ptc.')
     n = n / 10
   enddo
   
-  datum_value = real(ptc_nf%spin_tune .sub. expo)
+  if (ptc_nf%state%nocavity) then
+    datum_value = real(ptc_nf%spin_tune .sub. expo)
+  else
+    datum_value = real(ptc_nf%u_spin_tune .sub. expo)
+  endif
+
   valid_value = .true.
 
 !-----------
@@ -3041,7 +3070,12 @@ case ('spin_tune_ptc.')
   expo = 0
   expo(6) = n 
 
-  datum_value = real(ptc_nf%spin_tune .sub. expo)
+  if (ptc_nf%state%nocavity) then
+    datum_value = real(ptc_nf%spin_tune .sub. expo)
+  else
+    datum_value = real(ptc_nf%u_spin_tune .sub. expo)
+  endif
+
   valid_value = .true.
 
 !-----------
@@ -3151,13 +3185,7 @@ case ('t.', 'tt.')
 
   if (ix_start == ix_ele) then
     if (tao_branch%ix_ref_taylor /= ix_ref .or. tao_branch%ix_ele_taylor /= ix_ele) then
-      ix0 = tao_branch%ix_ele_taylor
-      if (tao_branch%ix_ref_taylor == ix_ref .and. ix_ele > ix0) then
-        call transfer_map_calc (lat, tao_branch%taylor_save, err, ix0, ix_ele, orbit(ix0), &
-                                                  unit_start = .false., concat_if_possible = s%global%concatenate_maps)
-      else
-        call transfer_map_calc (lat, tao_branch%taylor_save, err, ix_ref, ix_ele, orbit(ix_ref), concat_if_possible = s%global%concatenate_maps)
-      endif
+      call transfer_map_calc (lat, tao_branch%taylor_save, err, ix_ref, ix_ele, orbit(ix_ref), concat_if_possible = s%global%concatenate_maps)
 
       if (err) then
         call tao_set_invalid (datum, 'MAP TERM OVERFLOW', why_invalid, print_err = print_err)

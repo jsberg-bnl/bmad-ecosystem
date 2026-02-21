@@ -50,7 +50,7 @@ INTERNAL_STATE_zhe=>INTERNAL_STATE,ALLOC_TREE_zhe=>ALLOC_TREE
   private liebraquaternion,liebraso3,pow_tpsaMAP,c_concat_quaternion_ray,matrix_to_quaternion_in_c_damap,iexp_ad
   private EQUALql_cmap,EQUALcmap_ql,EQUAL_complex_quaternion_c_quaternion,EQUAL_c_quaternion_complex_quaternion
   private NO,ND,ND2,NP,NDPT,NV,ndptb,rf,c_real_spinmatrix,c_taylor_spinmatrix
-  private c_concat_c_uni_ray,c_concat_c_uni_rays,c_EQUALVECqua
+  private c_concat_c_uni_ray,c_concat_c_uni_rays,c_EQUALVECqua 
   integer, target :: NP,NO,ND,ND2,NV,NDPT,ndptb,rf
   private nd_used
   integer nd_used
@@ -157,6 +157,8 @@ private EQUAL_arrayreal_arraytaylor,EQUAL_arraycomplex_arraytaylor
 private  EQUAL_arraytaylor_arrayreal,EQUAL_arraytaylor_arraycomplex
 private quaternion_to_spinmatrix,makeso3_equal
 logical :: correct_quaternion_field=.true.
+ logical,private :: unstable(NDIM2t/2) !,hyperbolic
+
 !  These routines computes lattice functions a la Ripken-Forest-Wolski
 !type c_lattice_function
 ! real(dp) :: E(3,6,6) =0 ,K(3,6,6) =0 ! E : moments, K : Invariants
@@ -477,6 +479,7 @@ logical :: correct_quaternion_field=.true.
      MODULE PROCEDURE c_get_coeff 
   END INTERFACE
 
+ 
   INTERFACE OPERATOR (.index.)
 !  extract linear dependence on ith variables. Useful to get matrices.
     MODULE PROCEDURE GETintmat  ! complex(dp)=t.index.i for example  t.index.2= t.sub[0,1,0,...]
@@ -1015,6 +1018,49 @@ if(mf/=0) then
 endif
 
 end subroutine c_get_indices
+
+subroutine c_get_param(nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1)
+implicit none
+integer nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1
+
+
+nd1=nd
+ndt1=ndt
+nd21=nd2
+nd2t1=nd2t
+ndharm1=ndharm
+nd2harm1=nd2harm
+ndpt1=ndpt
+ndptb1=ndptb
+ndct1=ndct
+ndc2t1=ndc2t
+nv1=nv
+rf1=rf
+np1=np
+
+end subroutine c_get_param
+
+subroutine c_set_param(nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1)
+implicit none
+integer nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1
+
+nd=nd1
+ndt=ndt1
+nd2=nd21 
+nd2t=nd2t1
+ndharm=ndharm1
+nd2harm=nd2harm1
+ndpt=ndpt1
+ndptb=ndptb1
+ndct=ndct1
+ndc2t=ndc2t1
+nv=nv1
+rf=rf1
+np=np1
+
+end subroutine c_set_param
+
+
 
   subroutine locally_set_da_pointers()
     use da_arrays,only : c_
@@ -1681,6 +1727,8 @@ end subroutine c_get_indices
       s1%damping=0
       s1%spin_tune=0
      s1%quaternion_angle=0
+      s1%unstable=.false.
+     ! s1%hyperbolic=.false.
   END SUBROUTINE alloc_c_normal_form
 
   SUBROUTINE  kill_c_normal_form(S1)
@@ -3601,8 +3649,10 @@ endif
       n=sqrt(2.e0_dp)
      endif
           do i=1,ndt
-             from_phasor%v(2*i-1)=n*((0.5_dp.cmono.(2*i-1))+(0.5_dp.cmono.(2*i)))
+         if(.not.unstable(i)) then  !.and.(.not.hyperbolic)) then
+              from_phasor%v(2*i-1)=n*((0.5_dp.cmono.(2*i-1))+(0.5_dp.cmono.(2*i)))
              from_phasor%v(2*i)=n*((0.5_dp.cmono.(2*i-1))-(0.5_dp.cmono.(2*i)))/i_
+        endif
           enddo
 
           do i=nd,nd-rf+1,-1
@@ -11953,7 +12003,7 @@ subroutine c_linear_a(xy,a1)
     integer idef(ndim2t/2)
     real(dp), allocatable :: fm(:,:),fmi(:,:),fmii(:,:)
     type(c_damap) s1
-
+    type(c_normal_form) n
 
     if(.not.c_stable_da) return
 
@@ -12902,6 +12952,109 @@ subroutine c_full_canonise(at,a_cs,as,a0,a1,a2,rotation,phase,nu_spin,irot)
     call kill(pha,tune_spin)
 end subroutine c_full_canonise
 
+
+subroutine c_full_canonise_linear(at,a_cs,a0,a1,phase) 
+!#general: manipulation
+!# This routine is of great pedagogical importance.
+!# It factors a canonical transformation as
+!# at=a_cs o rotation(phase,nu_spin) as explained in Chap.7 of my Springer book.
+!# a_cs = a_s o a_0 o a_1 o a_2
+    implicit none
+    type(c_damap) , intent(inout) :: at,a_cs 
+    type(c_damap) , optional, intent(inout) :: a1,a0
+    type(c_taylor) ,optional, intent(inout) :: phase(:)
+
+    type(c_damap) ar,att,phi,a0t,a1t,ri
+    type(c_taylor) pha
+    integer i,kspin,ir
+    real(dp) norm
+
+    call alloc(ar)
+    call alloc(att)
+    call alloc(a0t)
+    call alloc(a1t)
+
+    call alloc(phi)
+    call alloc(pha)   
+        call alloc(ri)
+  !  at= (a,s) =  (a,I) o  (I,s)
+  !  call c_full_norm_spin(at%s,kspin,norm)  
+
+    call c_full_norm_spin_map(at,kspin,norm)
+ 
+ ! storing the spin because the code is careless (sets it to zero)   
+ 
+
+       att=at
+
+ 
+!  at= (a,s) =  (att,I) o  (I,ats)
+
+      att%s=0
+      att%q=0.0_dp
+
+      ar=1
+ 
+    call extract_a0(att,a0t)
+ 
+    phi=1
+
+ 
+ 
+    call extract_a1(att,a1t,phi)
+    
+ 
+!    if(present(phase))     ar=ar*phi
+!call print(phi%v(6),6)
+!pause 2
+
+ar=1
+ 
+ 
+
+ 
+ 
+
+     
+    if(present(phase))     then 
+         ri=from_phasor(-1)
+         phi=c_simil(ri,phi,1)
+    endif
+ 
+    a_cs=a0t*a1t 
+ 
+    
+
+    if(present(phase)) then
+     do i=1,nd2t/2
+       pha=(phi%v(2*i).k.(2*i))
+       pha=(-i_*log(pha)/twopi).cut.no
+       phase(i)=pha+phase(i)
+     enddo
+      if(ndpt/=0) then
+        if(mod(ndpt,2)==0) then
+         i=ndpt/2
+        else
+         i=ndptb/2
+        endif
+       phase(i)=phase(i)+phi%v(ndptb)-(1.0_dp.cmono.ndptb)
+      endif
+    endif
+ 
+
+    if(present(a0)) a0=a0t
+ 
+    if(present(a1)) a1=a1t
+
+    call kill(ri)
+    call kill(ar)
+    call kill(att)
+    call kill(a0t)
+    call kill(a1t)
+    call kill(phi)
+    call kill(pha)
+end subroutine c_full_canonise_linear
+
 subroutine c_identify_resonance(j,n,c) 
     implicit none
     integer, intent(inout) :: J(:)
@@ -13302,8 +13455,9 @@ alpha=2*atan2(q0%x(2),q0%x(0))
    m1%e_ij= n%s_ijr  !using m1 to transform equilibrium beam sizes
    ri=from_phasor()
    ri=c_simil(ri,m1,1)
+ 
    m1=c_simil(n%a_t,ri,1)
-   
+ 
    n%s_ij0=m1%e_ij
 
 !   if(use_quaternion.and.(.false.)) then
@@ -16077,7 +16231,6 @@ ft=f
     real(dp),dimension(ndim2t)::reval,aieval,ort
     real(dp),dimension(ndim2t,ndim2t)::revec,aievec,fm,aa,vv
     real(dp) eig2
-
     if(.not.C_STABLE_DA) return
 
     Eigenvalues_off_unit_circle=1
@@ -16126,6 +16279,9 @@ ft=f
     do i=1,nd2harm    !nd2t !-ndc2t
        eig2 = reval(i)**2+aieval(i)**2
        if(abs(eig2 -1.0_dp).gt.eps_eigenvalues_off_unit_circle) then
+         if(mod(i,2)==0.and.abs(aieval(i))<eps_eigenvalues_off_unit_circle) then
+           unstable(i/2)=.true.
+         endif
            if(lielib_print(4)==1) then
              write(6,*) ' EIG6: Eigenvalues off the unit circle!'
              write(6,*) sqrt(eig2)
@@ -21660,14 +21816,19 @@ end subroutine cholesky_dt
   END SUBROUTINE c_ALLOC_Us
 
 
-  function  c_get_coeff(S1,J)  !new sagan
+  function  c_get_coeff(S1,Jj)  !new sagan
     implicit none
     type (C_UNIVERSAL_TAYLOR),INTENT(IN)::S1
-    integer,INTENT(IN)::J(:)
+    integer,INTENT(IN)::Jj(:)
+    integer, allocatable ::J(:)
 
     complex (dp)c_get_coeff
     INTEGER i,n,done
      
+     allocate(J(S1%NV))
+     J=0
+     j(1:size(JJ))=jj
+
      c_get_coeff=0
     do i=1,s1%n
         done=0
@@ -21679,8 +21840,12 @@ end subroutine cholesky_dt
       exit
         endif
     enddo
+    deallocate(j)
 
   END function c_get_coeff
+
+   
+
 
   SUBROUTINE  c_fill_uni_r(S2,S1)  !new sagan
     implicit none
@@ -22000,6 +22165,78 @@ nomax=0
     if (.not. nice_taylor_print) write(iunit0,'(A)') '                                      '
 
   end subroutine c_printunitaylor_old
+
+  subroutine c_print_universal_taylor(ut,iunit )
+    implicit none
+    type(c_universal_taylor) :: ut
+    integer, optional :: iunit
+    integer   i,ii
+
+ 
+    integer iunit0
+
+      complex(dp) v
+    iunit0=6
+ 
+    if(present(iunit)) iunit0=iunit
+ 
+ write(iunit,'(3(1x,i4),1x,a9)') ut%n, ut%nd2, ut%nv," n,nd2,nv"
+ 
+   
+    do i = 1,ut%n
+          write(iunit, '(2(1x,g23.16),i4,1x,100(2x,i2))')   ut%c(i), sum(ut%j(i,:)),(ut%j(i,ii),ii=1,ut%nv)
+       enddo
+
+ 
+  end subroutine c_print_universal_taylor
+
+
+  subroutine c_read_universal_taylor(ut,iunit )
+    implicit none
+    type(c_universal_taylor) :: ut
+    integer, optional :: iunit
+    integer   i,ii,ij
+    integer iunit0,N,NV,nd2
+    real(dp) r,v
+
+    iunit0=6
+ 
+    if(present(iunit)) iunit0=iunit
+   
+    if(associated(ut%n)) call kill(ut)
+
+    read(iunit,*) N,NV,nd2
+    call alloc(ut,N,NV,nd2)
+
+    do i = 1,ut%n
+          read(iunit,*)   r,v,ij, (ut%j(i,ii),ii=1,ut%nv)
+        ut%c(i)=r+i_*v
+       enddo
+
+ 
+  end subroutine c_read_universal_taylor
+
+  subroutine c_read_simple(t,filename)
+    implicit none
+    type(c_taylor) :: t
+    integer   i,ii,n,nv
+    character(*) filename
+    integer mf
+    integer,allocatable:: J(:)
+    complex(dp) v
+ 
+   call kanalnummer(mf,filename)
+   read(mf,*) n,nv
+   allocate(J(nv))
+     t=0.0_dp
+    do i = 1,n
+          read(mf, *)   v,j
+       t=t+(v.cmono.j)
+       enddo
+
+  close(mf)
+  deallocate(J)
+  end subroutine c_read_simple
 
 subroutine r_field_for_demin(f,ut)
 implicit none
@@ -22884,6 +23121,9 @@ subroutine c_normal(xyso3,n,dospin,no_used,rot,phase,nu_spin,canonize)
     call kill(n%g)
     call alloc(n%ker)
     call alloc(n%g)
+n%unstable=.false.
+unstable=.false.
+!hyperbolic=n%hyperbolic
     n%g%dir=-1
     n%ker%dir=1
 
@@ -23031,6 +23271,7 @@ endif
        endif  
     enddo
  
+
     n%ker=0  ! In case reusing normal form
 
     do i=2,not
@@ -23142,11 +23383,18 @@ endif
         n%ker%f(1)%v(k)=n%ker%f(1)%v(k)-(log(eg(k)).cmono.je)
 
         if(mod(k,2)==1) then
+ 
+   if(.not.unstable((k+1)/2) ) then
             n%tune((k+1)/2)=aimag(log(eg(k)))/twopi
             n%damping((k+1)/2)=real(log(eg(k)))
             if(n%tune((k+1)/2)<0.and.n%positive) n%tune((k+1)/2)=n%tune((k+1)/2)+1.0_dp
             if(n%tune((k+1)/2)<-0.5_dp.and.(.not.n%positive)) n%tune((k+1)/2)=n%tune((k+1)/2)+1.0_dp
             if(n%tune((k+1)/2)> 0.5_dp.and.(.not.n%positive)) n%tune((k+1)/2)=n%tune((k+1)/2)-1.0_dp
+           else
+            n%tune((k+1)/2)=log(eg(k))
+            n%damping((k+1)/2)= log(eg(k)*eg(k+1))/2.0_dp
+   endif 
+
 
         endif
        endif 
@@ -23491,11 +23739,21 @@ if(c_%ndpt/=0) ncoast=1
 
 do i=1,(c_%nd-ncoast)
 
+  ! IF(.not.hyperbolic.or..not.unstable(i) ) then
+   IF( .not.unstable(i) ) then
+
 lam=n%tune(i)
 if(n%tune(i)>0.5e0_dp) lam=lam-1.0_dp
  n%H_l%v(2*i-1)=-(i_*twopi*lam)*dz_c(2*i-1)-n%damping(i)*dz_c(2*i-1)
  n%H_l%v(2*i)=(i_*twopi*lam)*dz_c(2*i)-n%damping(i)*dz_c(2*i)
+ELSE
+ n%H_l%v(2*i-1)= (-n%damping(i)-n%tune(i))*dz_c(2*i-1)
+ n%H_l%v(2*i)=(-n%damping(i)+n%tune(i))*dz_c(2*i-1)
+
+ENDIF  ! HYPERBOLIC
+
 enddo
+
 if(ncoast/=0) then
  n%H_l%v(c_%ndptb)=n%tune(c_%nd)*dz_c(c_%ndpt)
 endif
@@ -23523,7 +23781,15 @@ if(present(phase)) then
 ! ncoast=0
  !if(c_%ndpt/=0) ncoast=1
  do i=1,c_%nd  !-ncoast
+ !  IF(.not.hyperbolic.or..not.unstable(i) ) then
+   IF( .not.unstable(i) ) then
+ 
   phase(i)=aimag(n%h%v(2*i).k.(2*i))/twopi
+
+    ELSE
+     phase(i)=(n%h%v(2*i).k.(2*i)) 
+
+    ENDIF
  enddo
 
  if(c_%ndptb/=0) then
@@ -24807,4 +25073,244 @@ real(dp) max
 	enddo
 	return
 end function
+
+
+
+
+subroutine  c_average_6d(m_in,n,disp,uph,dospin,uspin)
+implicit none
+type(c_normal_form) n
+type(c_damap) m,ai,aia,rot,aiat,m_in
+type(c_universal_taylor) disp(4),um(6),uph(3),qu(0:4)  
+type(c_universal_taylor), optional :: uspin
+logical, optional :: dospin
+logical dos
+type(c_taylor) phase(3),nu_spin
+type(internal_state) state
+integer i,j,k,nt,npt,no,np,l
+integer nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1
+integer ndt1n,nd2t1n,ndharm1n,nd2harm1n,ndpt1n,ndptb1n,ndct1n,ndc2t1n,jj(lnv)
+type(c_damap) L_r , N_r , L_s, N_s
+     !  use_bmad_units=.true.
+     ! ndpt_bmad=1
+ 
+     !  use_bmad_units=.false.
+    !  ndpt_bmad=0
+call alloc(m)
+m=m_in
+
+if(ndpt_bmad==0) then
+ npt=5
+ nt=6
+else
+ npt=6
+ nt=5
+endif
+
+no=c_%no
+np=0
+dos=.false.
+if(present(dospin)) dos=dospin
+ call alloc(ai,rot,aia,aiat,L_r , N_r , L_s, N_s)
+  call alloc(phase)
+  call alloc(nu_spin)
+call c_normal(m,n)
+
+ai=n%atot**(-1)
+
+do i=1,4
+ ai%v(i)=0.0_dp
+enddo
+ 
+aia= n%atot*ai
+ 
+rot=1
+do i=1,4
+ rot%v(i)=0.0_dp
+enddo
+aia=aia*rot
+ 
+!!!!   redefining dispersion and xi around the average of delta and ct
+rot=1
+rot%v(5)=aia%v(5)
+rot%v(6)=aia%v(6)
+ rot=rot**(-1)
+ 
+ 
+aia=aia *rot
+ 
+
+
+
+do i=1,4
+ disp(i)=aia%v(i)
+enddo
+
+do i=1,4 
+do j=1,disp(i)%n
+k=0
+do l=1,4
+ k=iabs(disp(i)%J(j,l))  + k
+enddo
+if(k/=0) disp(i)%c(j)=0
+enddo
+ aia%v(i)= disp(i) 
+ disp(i)=aia%v(i)
+enddo  
+ 
+ 
+
+!!! remove xi function completely 
+
+rot=1
+rot%v(nt)=0.0_dp
+ 
+aia=aia*rot
+
+! make aia symplectic, important for phase slip
+
+ aia%v(nt)=(-1)**npt*((aia%v(1).d.npt)*(1.0_dp.cmono.2)-(aia%v(2).d.npt)*(1.0_dp.cmono.1) &
+  +(aia%v(3).d.npt)*(1.0_dp.cmono.4)-(aia%v(4).d.npt)*(1.0_dp.cmono.3))
+
+ aia%v(npt)=(-1)**nt*((aia%v(1).d.nt)*(1.0_dp.cmono.2)-(aia%v(2).d.nt)*(1.0_dp.cmono.1) &
+  +(aia%v(3).d.nt)*(1.0_dp.cmono.4)-(aia%v(4).d.nt)*(1.0_dp.cmono.3))
+
+
+do i=1,6
+aia%v(i)=aia%v(i)+(1.0_dp.cmono.i)
+enddo
+
+aia%v(npt)=(1.0_dp.cmono.npt)
+
+
+call c_get_param(nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1)
+
+!write(6,"(13(1x,i2))")nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1
+!                     3    3    6     6     3      6        0     0      0     0      6    0  0
+!                     3    2    6     4     2      4        6     5      1     2      6    0  0
+ndt1n=2
+nd2t1n=4
+ndharm1n=2
+nd2harm1n=4
+ndpt1n=5+ndpt_bmad
+ndptb1n=6-ndpt_bmad
+ndct1n=1
+ndc2t1n=2
+
+call c_set_param(nd1,ndt1n,nd21,nd2t1n,ndharm1n,nd2harm1n,ndpt1n,ndptb1n,ndct1n,ndc2t1n,nv1,rf1,np1)
+
+ 
+ m=aia**(-1)*m*aia
+m%v(npt)=1.0_dp.cmono.npt
+
+ do i=1,6
+ um(i) =m%v(i)
+enddo
+
+if(dos) then
+ do i=0,3
+ qu(i) =m%q%x(i)
+ enddo
+endif
+
+do i=1,6
+do j=1,um(i)%n
+k=0
+
+ k=iabs(um(i)%J(j,nt))  
+
+if(k/=0) um(i)%c(j)=0
+enddo
+ m%v(i)= um(i) 
+ um(i)=m%v(i)
+enddo  
+
+if(dos) then
+do i=0,3
+do j=1,qu(i)%n
+k=0
+
+ k=iabs(qu(i)%J(j,nt))  
+
+if(k/=0) qu(i)%c(j)=0
+enddo
+ m%q%x(i)= qu(i) 
+ qu(i)= m%q%x(i)
+enddo  
+endif
+
+m%v(nt)=m%v(nt)+(1.0_dp.cmono.nt)
+
+if(dos) then
+rot%q=m%q
+rot%v(1)=sqrt(rot%q%x(0)**2+rot%q%x(1)**2+rot%q%x(2)**2+rot%q%x(3)**2)
+
+do i=0,3
+ rot%q%x(i)=rot%q%x(i)/rot%v(1)
+enddo
+endif
+
+ do i=1,6
+ um(i) =m%v(i)
+enddo
+
+do i=1,4
+do j=1,um(i)%n
+
+k=0
+do l=1,4
+ k=iabs(um(i)%J(j,l))  + k
+enddo
+if(k==0.and.um(i)%J(j,npt)/=0) um(i)%c(j)=0
+enddo
+ m%v(i)= um(i) 
+ um(i)= m%v(i)
+enddo  
+ 
+
+call symplectify_for_zhe(m,L_r , N_r , L_s, N_s )
+m=L_s * N_s
+m%q=rot%q
+  
+  
+ 
+! m = L_r o N_r o L_s o N_s
+! d= = L_r o N_r
+! ms= L_s o N_s
+
+ 
+
+ 
+if(dos) then
+ call c_normal(m,n,phase=phase,dospin=dos,nu_spin=nu_spin)
+  else
+ call c_normal(m,n,phase=phase,dospin=dos)
+endif
+
+if(dos) then
+ uspin=nu_spin
+endif
+do i=1,3
+uph(i)=phase(i)
+enddo
+
+do i=1,3
+do j=1,uph(i)%n
+ k=iabs(uph(i)%J(j,2)-uph(i)%J(j,1))+iabs(uph(i)%J(j,4)-uph(i)%J(j,3))
+ if(k/=0) uph(i)%c(j)=0.0_dp
+enddo
+ phase(i)=uph(i)
+ uph(i)=phase(i)
+enddo
+
+call c_set_param(nd1,ndt1,nd21,nd2t1,ndharm1,nd2harm1,ndpt1,ndptb1,ndct1,ndc2t1,nv1,rf1,np1)
+
+ 
+ call kill(um)
+ call kill(phase)
+  call kill(nu_spin)
+call kill(ai,rot,aia,aiat,L_r , N_r , L_s, N_s)
+call kill(m)
+end subroutine  c_average_6d
+
   END MODULE  c_tpsa

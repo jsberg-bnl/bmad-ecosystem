@@ -64,7 +64,7 @@ integer n_size
 integer, optional :: dflt_uni, dflt_eval_point
 integer i, n, ix
 
-logical use_good_user, err_flag
+logical use_good_user, err_flag, err
 logical, optional :: print_err
 logical printit
 
@@ -79,7 +79,7 @@ character(*), parameter :: r_name = "tao_evaluate_expression_new"
 
 ! 
 
- err_flag = .true.
+err_flag = .true.
 printit = logic_option(.true., print_err)
 default_source = ''
 if (present(dflt_source)) default_source = dflt_source
@@ -103,10 +103,9 @@ endif
 
 !
 
-call expression_string_to_tree(phrase, tree, err_flag, err_str)
+call expression_string_to_tree(phrase, tree, err, err_str)
 
-
-if (err_flag) then
+if (err) then
   call out_io(s_error$, r_name, 'Error parsing expression: ' // err_str)
   return
 endif
@@ -121,7 +120,7 @@ if (s%global%verbose_on) call type_expression_tree(tree)
 err_flag = .false.
 tao_tree = tao_eval_node_struct(tree%type, tree%name, 1.0_rp, null(), null(), null(), null())
 call bmad_tree_to_tao_tree(tree, tao_tree, expression, err_flag); if (err_flag) return
-call deallocate_tree(tree)
+call deallocate_expression_tree(tree)
 call tree_param_evaluate(tao_tree, expression, err_flag, printit); if (err_flag) return
 
 if (s%global%verbose_on) call tao_type_expression_tree(tao_tree)
@@ -140,32 +139,30 @@ call tao_deallocate_tree(tao_tree)
 !------------------------------------------------------------------------------------
 contains
 
+subroutine expression_asterisk_substitute(phrase)
+
+character(*) phrase
+character(1) left_char, right_char, ch, char_pm
+integer i0, istar, ii, i_pm
+logical wild
+
 ! Substitute "??" for "*" characters that are being used as wildcards and not as multiplication symbols. 
 ! This is done so as to not confuse expression tree creation.
 ! Wildcard examples: 
 !    "[*]|", "*.*|", "*.x|", "*@orbit.x|", "*@*|", "orbit.*[3]|", "ele::q*1[beta_a]", "var::*d|model"
-!    "quad_k1[*]|model"
+!    "quad_k1[*]|model", "a*b|design" when something like "var::" is default prefix.
 ! Non-wildcard examples:
-! "emit*data::mf.xm|model", "3*[1,2]", "3*.42", "a*[b,c]"
+! "emit*data::mf.xm|model", "3*[1,2]", "3*.42", "a*[b,c]" (but a*[2,3]|model is wild)
 !
 ! Wild if "*" is bounded by:
 !   "::" < "*" < "|"  or
 !   "::" < "*" < "["  or
 !   "*@"
  
-subroutine expression_asterisk_substitute(phrase)
-
-character(*) phrase
-character(1) left_char, right_char, ch
-integer i0, istar, ii
-logical wild
-
-!
-
 i0 = 1
-main_loop: do 
+star_loop: do 
   istar = index(phrase(i0:), '*')
-  if (istar == 0) return
+  if (istar == 0) exit
 
   istar = istar  + i0 - 1
   i0 = istar + 1
@@ -190,8 +187,25 @@ main_loop: do
     end select
   enddo
 
+  if (right_char == '[') then   ! See if matching ']|' exists.
+    do ii = ii+1, len_trim(phrase)
+      ch = phrase(ii:ii)
+      select case (ch)
+      case ('|', '+', '-', '/', '^', ' ', '[', '@', '(', ')')
+        exit
+      case (']')
+        if (ii+1 > len(phrase)) exit
+        if (phrase(ii+1:ii+1) == '|') right_char = '|'
+        exit
+      end select
+    enddo
+  endif
+
+  !
+
   wild = .false.
   if (left_char == ':' .and. (right_char == '[' .or. right_char == '|')) wild = .true.
+  if (left_char == '!' .and. right_char == '|') wild = .true.
   if (istar > 1) then
     if (phrase(istar-1:istar-1) == '[' .and. phrase(istar+1:istar+1) == ']') wild = .true.
   endif
@@ -200,7 +214,81 @@ main_loop: do
 
   ! Is a wild card
   phrase = phrase(1:istar-1) // '??' // phrase(istar+1:)
-enddo main_loop
+enddo star_loop
+
+!-----------------------------------
+! Substitute "?!" for "+" characters and "?#" for "-" characters where needed. Examples:
+!   "ele::q2-1[k1]"
+
+i0 = 1
+char_pm = '+'
+
+pm_loop: do
+  i_pm = index(phrase(i0:), char_pm)
+  if (i_pm == 0) then
+    if (char_pm == '-') return  
+    char_pm = '-'
+    i0 = 1
+    cycle
+  endif
+
+  i_pm = i_pm  + i0 - 1
+  i0 = i_pm + 1
+
+  left_char = '!'   ! Beginning of line
+  do ii = i_pm-1, 1, -1
+    ch = phrase(ii:ii)
+    select case (ch)
+    case (':', '|', '+', '-', '*', '/', '^', ' ', ']', '[', '@', '(', ')')
+      left_char = ch
+      exit
+    end select
+  enddo
+
+  if (index('0123456789', phrase(i_pm+1:i_pm+1)) == 0) cycle
+  right_char = '!'
+  do ii = i_pm+1, len_trim(phrase)
+    ch = phrase(ii:ii)
+    select case (ch)
+    case (':', '|', ' ', ']', '[', '@', '(', ')')
+      right_char = ch
+      exit
+    case ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
+    case default
+      cycle pm_loop
+    end select
+  enddo
+
+  if (right_char == '[') then   ! See if matching ']|' exists.
+    do ii = ii+1, len_trim(phrase)
+      ch = phrase(ii:ii)
+      select case (ch)
+      case ('|', '+', '-', '/', '^', ' ', '[', '@', '(', ')')
+        exit
+      case (']')
+        if (ii+1 > len(phrase)) exit
+        if (phrase(ii+1:ii+1) == '|') right_char = '|'
+        exit
+      end select
+    enddo
+  endif
+
+  !
+
+  wild = .false.
+  if (left_char == ':' .and. (right_char == '[' .or. right_char == '|')) wild = .true.
+  if (left_char == '!' .and. right_char == '|') wild = .true.
+  if (.not. wild) cycle
+
+  ! Is a wild card
+  if (char_pm == '+') then
+    phrase = phrase(1:i_pm-1) // '?!' // phrase(i_pm+1:)
+  else
+    phrase = phrase(1:i_pm-1) // '?#' // phrase(i_pm+1:)
+  endif
+
+enddo pm_loop
+
 
 end subroutine expression_asterisk_substitute
 
@@ -305,6 +393,18 @@ do in = 1, n_node
     ix = index(tnode%name, '??')
     if (ix == 0) exit
     tnode%name = tnode%name(1:ix-1) // '*' // tnode%name(ix+2:)
+  enddo
+
+  do
+    ix = index(tnode%name, '?!')
+    if (ix == 0) exit
+    tnode%name = tnode%name(1:ix-1) // '+' // tnode%name(ix+2:)
+  enddo
+
+  do
+    ix = index(tnode%name, '?#')
+    if (ix == 0) exit
+    tnode%name = tnode%name(1:ix-1) // '-' // tnode%name(ix+2:)
   enddo
 
   select case (tnode%type)

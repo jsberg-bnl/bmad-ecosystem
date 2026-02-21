@@ -343,12 +343,6 @@ case ('HIGHER_ORDER_FRINGE_TYPE')
   call get_switch (attrib_word, fringe_type_name(1:), ix, err_flag, ele, delim, delim_found)
   return
 
-case ('SPACE_CHARGE_ON')
-  call parser_error ('Note: "bmad_com[SPACE_CHARGE_ON]" has been renamed "bmad_com[HIGH_ENERGY_SPACE_CHARGE_ON]"', &
-                     'Will run normally...', level = s_warn$)
-  word = 'HIGH_ENERGY_SPACE_CHARGE_ON'
-  key = def_bmad_com$
-
 case ('COHERENT_SYNCH_RAD_ON')
   call parser_error ('Note: "bmad_com[COHERENT_SYNCH_RAD_ON]" has been renamed "bmad_com[CSR_AND_SPACE_CHARGE_ON]"', &
                      'Will run normally...', level = s_warn$)
@@ -531,7 +525,6 @@ if (key == def_particle_start$ .or. key == def_bmad_com$ .or. key == def_space_c
     if (associated(a_ptrs(1)%i, ptc_com%old_integrator))                   bp_com%extra%old_integrator_set              = .true.
 
   elseif (associated(a_ptrs(1)%l)) then
-    if (associated(a_ptrs(1)%l, bmad_com%auto_bookkeeper)) a_ptrs(1)%l => logic  ! Auto_bookkeeper must not be set.
     call parser_get_logical (word, a_ptrs(1)%l, ele%name, delim, delim_found, err_flag)
     if (err_flag) return
     if (associated(a_ptrs(1)%l, bmad_com%absolute_time_ref_shift))        bp_com%extra%absolute_time_ref_shift_set         = .true.
@@ -2032,6 +2025,10 @@ case ('KICK0')
   call get_switch (attrib_word, kick0_name(1:), ix, err_flag, ele, delim, delim_found); if (err_flag) return
   ele%value(kick0$) = ix
 
+case ('K0L_STATUS')
+  call get_switch (attrib_word, k0l_status_name, ix, err_flag, ele, delim, delim_found); if (err_flag) return
+  ele%value(k0l_status$) = ix
+
 case ('LATTICE_TYPE')   ! Old style
   call parser_error ('PARAMETER[LATTICE_TYPE] IS OLD SYNTAX.', &
                      'PLEASE REPLACE WITH PARAMETER[GEOMETRY] = OPEN/CLOSED')
@@ -2294,6 +2291,9 @@ case default   ! normal attribute
       !
 
       select case (attrib_word)
+      case ('HIGH_ENERGY_SPACE_CHARGE_ON')
+        if (is_true(ele%value(high_energy_space_charge_on$))) bmad_com%high_energy_space_charge_on = .true.
+
       case ('CMAT_11', 'CMAT_12', 'CMAT_21', 'CMAT_22')
         coef = 1 - determinant(ele%c_mat)
         if (coef >= 0) ele%gamma_c = sqrt(coef)

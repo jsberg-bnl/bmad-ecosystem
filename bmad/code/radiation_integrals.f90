@@ -292,6 +292,7 @@ if (use_cache .or. init_cache) then
     if (key2 == undulator$ .or. key2 == em_field$) key2 = wiggler$
 
     orb_start = orbit(ixe-1)
+    orb_start%time_dir = 1    ! Can be -1 if there are fixer elements in the lattice.
     call set_tracking_method_for_element_integration(ele2)
 
     !------------------------------------
@@ -609,7 +610,6 @@ mode%b%synch_int(6) = i6b
 
 if (branch%param%geometry == closed$) then
   if (i2 /= 0) then
-
     mode%a%emittance         = const_q * gamma2_factor * i5a / (i2 - i4a)
     mode%a%emittance_no_vert = mode%a%emittance
     mode%b%emittance         = const_q * (gamma2_factor * i5b + 13 * i6b / 55) / (i2 - i4b)
@@ -625,7 +625,6 @@ if (branch%param%geometry == closed$) then
     else
       mode%sigE_E = 1d30  ! Something large
     endif
-
   endif
 
   mode%a%alpha_damp = energy_loss * mode%a%j_damp / (2 * energy)

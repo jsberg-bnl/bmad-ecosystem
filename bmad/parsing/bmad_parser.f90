@@ -44,7 +44,7 @@ implicit none
 type (lat_struct), target :: lat, in_lat
 type (lat_struct), optional :: parse_lat
 type (ele_struct) this_ele
-type (ele_struct), pointer :: ele, slave, lord, ele2, ele0, param_ele
+type (ele_struct), pointer :: ele, slave, lord, ele2, ele0, param_ele, line_ele
 type (ele_struct), save :: marker_ele
 type (seq_struct), target, allocatable :: sequence(:)
 type (branch_struct), pointer :: branch0, branch
@@ -82,15 +82,13 @@ logical, optional :: make_mats6, digested_read_ok, err_flag
 logical delim_found, arg_list_found, wild_here
 logical end_of_file, ele_found, match_found, err, finished, exit_on_error
 logical multipass, heterogeneous_ele_list, is_ok
-logical auto_bookkeeper_saved, is_photon_fork, created_new_branch
+logical is_photon_fork, created_new_branch
 
 ! See if digested file is open and current. If so read in and return.
 ! Note: The name of the digested file depends upon the real precision.
 
 call cpu_time(bp_com%time0)
 call init_bmad()
-auto_bookkeeper_saved = bmad_com%auto_bookkeeper
-bmad_com%auto_bookkeeper = .false.  
 
 if (present(err_flag)) err_flag = .true.
 bp_com = bp_common_struct()
@@ -780,7 +778,7 @@ endif
 ! We now have read in everything. 
 
 bp_com%input_line_meaningful = .false.
-param_ele    => in_lat%ele(ix_param_ele)
+param_ele => in_lat%ele(ix_param_ele)
 
 ! Sort lists and check for duplicates.
 
@@ -906,7 +904,7 @@ branch_loop: do i_loop = 1, n_branch_max
   branch => lat%branch(n_branch)
 
   call find_index (this_branch_name, in_lat%nametable, ix)
-  ele => in_lat%ele(ix) ! line_ele element associated with this branch.
+  line_ele => in_lat%ele(ix) ! line_ele element associated with this branch.
 
   ele0 => branch%ele(0)
   ele0%value(e_tot$) = -1
@@ -918,7 +916,8 @@ branch_loop: do i_loop = 1, n_branch_max
     lat%ele(0)                  = in_lat%ele(0)    ! Beginning element
     lat%ele(0)%orientation      = lat%ele(1)%orientation
     lat%version                 = bmad_inc_version$
-    lat%input_file_name         = full_lat_file_name             ! save input file  
+    lat%input_file_name         = full_lat_file_name             ! save input file
+    lat%parser_make_xfer_mats   = in_lat%parser_make_xfer_mats  
     lat%particle_start          = in_lat%particle_start
     lat%a                       = in_lat%a
     lat%b                       = in_lat%b
@@ -934,7 +933,7 @@ branch_loop: do i_loop = 1, n_branch_max
     lat%param%n_part = param_ele%value(n_part$)
 
     lat%param%particle = param_ele%ref_species
-    if (ele%ref_species /= not_set$) lat%param%particle = ele%ref_species
+    if (line_ele%ref_species /= not_set$) lat%param%particle = line_ele%ref_species
     if (lat%param%particle == not_set$) lat%param%particle = positron$
 
     ! The lattice name from a "parameter[lattice] = ..." line is 
@@ -960,14 +959,13 @@ branch_loop: do i_loop = 1, n_branch_max
     endif
 
   else  ! n_branch /= 0
-    branch%param%particle = ele%ref_species
+    branch%param%particle = line_ele%ref_species
   endif  
 
   !----
 
-  if (ele%value(live_branch$) /= real_garbage$) branch%param%live_branch = is_true(ele%value(live_branch$))
-  if (ele%value(high_energy_space_charge_on$) /= real_garbage$ .and. is_true(ele%value(high_energy_space_charge_on$))) bmad_com%high_energy_space_charge_on = .true.
-  if (ele%value(geometry$) /= real_garbage$) branch%param%geometry = nint(ele%value(geometry$))
+  if (line_ele%value(live_branch$) /= real_garbage$) branch%param%live_branch = is_true(line_ele%value(live_branch$))
+  if (line_ele%value(geometry$) /= real_garbage$) branch%param%geometry = nint(line_ele%value(geometry$))
 
   ! Transfer info from line element if parameters have been set.
 
@@ -976,26 +974,26 @@ branch_loop: do i_loop = 1, n_branch_max
   if (n_branch == 0 .and.  val /= real_garbage$) branch%param%default_tracking_species = nint(val)
 
   do i = 1, num_ele_attrib$
-    if (ele%value(i) == real_garbage$) cycle
+    if (line_ele%value(i) == real_garbage$) cycle
     select case (i)
-    case (default_tracking_species$);  branch%param%default_tracking_species = nint(ele%value(i))
-    case default;                      ele0%value(i) = ele%value(i)
+    case (default_tracking_species$);  branch%param%default_tracking_species = nint(line_ele%value(i))
+    case default;                      ele0%value(i) = line_ele%value(i)
     end select
   enddo
 
-  call set_this_real_val (ele%s,                 ele0%s)
-  call set_this_real_val (ele%ref_time,          ele0%ref_time)
-  call set_this_real_val (ele%floor%r(1),        ele0%floor%r(1))
-  call set_this_real_val (ele%floor%r(2),        ele0%floor%r(2))
-  call set_this_real_val (ele%floor%r(3),        ele0%floor%r(3))
-  call set_this_real_val (ele%floor%theta,       ele0%floor%theta)
-  call set_this_real_val (ele%floor%phi,         ele0%floor%phi)
-  call set_this_real_val (ele%floor%psi,         ele0%floor%psi)
-  call set_this_twiss_struct (ele%a, ele0%a)
-  call set_this_twiss_struct (ele%b, ele0%b)
-  call set_this_twiss_struct (ele%z, ele0%z)
-  call set_this_xy_disp_struct (ele%x, ele0%x)
-  call set_this_xy_disp_struct (ele%y, ele0%y)
+  call set_this_real_val (line_ele%s,                 ele0%s)
+  call set_this_real_val (line_ele%ref_time,          ele0%ref_time)
+  call set_this_real_val (line_ele%floor%r(1),        ele0%floor%r(1))
+  call set_this_real_val (line_ele%floor%r(2),        ele0%floor%r(2))
+  call set_this_real_val (line_ele%floor%r(3),        ele0%floor%r(3))
+  call set_this_real_val (line_ele%floor%theta,       ele0%floor%theta)
+  call set_this_real_val (line_ele%floor%phi,         ele0%floor%phi)
+  call set_this_real_val (line_ele%floor%psi,         ele0%floor%psi)
+  call set_this_twiss_struct (line_ele%a, ele0%a)
+  call set_this_twiss_struct (line_ele%b, ele0%b)
+  call set_this_twiss_struct (line_ele%z, ele0%z)
+  call set_this_xy_disp_struct (line_ele%x, ele0%x)
+  call set_this_xy_disp_struct (line_ele%y, ele0%y)
 
   call floor_angles_to_w_mat(ele0%floor%theta, ele0%floor%phi, ele0%floor%psi, ele0%floor%w)
 
@@ -1168,7 +1166,7 @@ endif
 
 do n = 0, ubound(lat%branch, 1)
   branch => lat%branch(n)
-  is_ok = transfer_fixer_params(branch%ele(0), branch%particle_start, .true.)
+  is_ok = transfer_fixer_params(branch%ele(0), .true., branch%particle_start)
   ix_ele_fix = 0
   ix_set = 0
   do i = 0, branch%n_ele_max
@@ -1257,13 +1255,20 @@ enddo
 
 ! Make the transfer matrices.
 ! Note: The bmad_parser err_flag argument does *not* include errors in 
-! lat_make_mat6 since if there is a match element, there is an error raised 
-! here since the Twiss parameters have not been set. But this is expected. 
+! lat_make_mat6 since the inability to make matrices is not a parsing error.
 
 call cpu_time(bp_com%time2)
 
-bmad_com%auto_bookkeeper = auto_bookkeeper_saved  ! potentially saves time with lat_make_mat6
-if (logic_option (.true., make_mats6)) call lat_make_mat6(lat, ix_branch = -1) 
+if (logic_option (.true., make_mats6) .and. lat%parser_make_xfer_mats) then
+  call lat_make_mat6(lat, ix_branch = -1, err_flag = err) 
+  if (err) then
+    call out_io(s_warn$, r_name, 'NOTE! There has been an error constructing element matrices about the zero orbit', &
+                                 '  just after lattice parsing.  This can happen for a number of reasons. ', &
+                                 '  One of them is that matrices just cannot be constructed around the zero orbit.', &
+                                 '  In any case, if you do not want to see these matrix construction error messages, ', &
+                                 '  just set "parameter[parser_make_xfer_mats] = False" in the lattice file.')
+  endif
+endif
 
 call g_integrals_calc(lat)
 
@@ -1336,10 +1341,6 @@ do i = 1, bp_com%num_lat_files
   ierr = stat(name, stat_b)
   lat%creation_hash = djb_hash(int_str(stat_b(2)) // int_str(stat_b(8)), lat%creation_hash)
 enddo
-
-! Restore auto_bookkeeper flag
-
-bmad_com%auto_bookkeeper = auto_bookkeeper_saved
 
 ! deallocate pointers
 

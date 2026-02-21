@@ -178,7 +178,7 @@ enddo
 ! too big to write in one piece
 
 read (d_unit, err = 9030, end = 9030) lat%use_name, lat%machine, lat%lattice, lat%input_file_name, lat%title
-read (d_unit, err = 9030, end = 9030) lat%a, lat%b, lat%z, lat%param, lat%version, lat%n_ele_track
+read (d_unit, err = 9030, end = 9030) lat%a, lat%b, lat%z, lat%param, lat%version, lat%n_ele_track, lat%parser_make_xfer_mats
 read (d_unit, err = 9030, end = 9030) lat%n_ele_track, lat%n_ele_max, lat%lord_state, lat%n_control_max, lat%n_ic_max
 read (d_unit, err = 9030, end = 9030) lat%input_taylor_order, lat%photon_type, lat%ramper_slave_bookkeeping
 read (d_unit, err = 9070, end = 9070) n_branch, lat%pre_tracker, n_custom, n_print
@@ -542,6 +542,16 @@ read (d_unit, err = 9120, end = 9120) ix_value(1:k_max), value(1:k_max)
 do k = 1, k_max
   ele%value(ix_value(k)) = value(k)
 enddo
+
+if (ele%key == lcavity$) then
+  if (nint(ele%value(n_cell$)) < 0 .and. ele%value(l_active$) == 0 .and. ele%value(l$) > 0) then
+    ele%value(warn_count$) = 1
+    call out_io(s_warn$, r_name, &
+        'Lcavity element ' // trim(ele%name) // ' has a finite length that is less than 1/2 of the RF wavelength.', &
+        'This means that the active length L_active will be zero and there will be no transverse pondermotive kick.', &
+        'Set "n_cell = 0" if you want a zero active length without this warning message.')
+  endif
+endif
 
 ! Control vars
 

@@ -58,7 +58,8 @@ type (ele_pointer_struct), allocatable :: used_list(:)
 type (ele_struct), pointer :: lord, ele2
 type (ele_struct), optional :: original_ele
 type (lat_param_struct) param
-type (coord_struct) :: orbit, local_orb, lab_orb, lord_orb, this_orb
+type (coord_struct) :: orbit, lab_orb, lord_orb, this_orb
+type (coord_struct), target :: local_orb
 type (em_field_struct) :: field, field1, field2, lord_field, l1_field, mode_field
 type (cartesian_map_struct), pointer :: ct_map
 type (cartesian_map_term1_struct), pointer :: ct_term
@@ -353,7 +354,8 @@ case (bmad_standard$)
   !------------------
   ! Drift, et. al. Note that kicks get added at the end for all elements
 
-  case (drift$, ecollimator$, rcollimator$, instrument$, monitor$, pipe$, marker$, fixer$, detector$, thick_multipole$)
+  case (drift$, ecollimator$, rcollimator$, instrument$, monitor$, pipe$, marker$, fixer$, detector$, &
+        multipole$, ab_multipole$, thick_multipole$)
 
   !------------------
   ! E_Gun
@@ -392,6 +394,7 @@ case (bmad_standard$)
     field%b(2) = -ele%value(hkick$) * f_p0c / ele%value(l$)
 
   !------------------
+  !------------------
   ! RFcavity and Lcavity  bmad_standard
   !
   ! For standing wave cavity:
@@ -419,6 +422,13 @@ case (bmad_standard$)
 
     if (ele%value(rf_frequency$) == 0) return
 
+    s_active_offset = (ele%value(l$) - ele%value(l_active$)) / 2  ! Relative to entrance end of the cavity
+    s_eff = s_body - s_active_offset
+    if (s_eff < 0 .or. s_eff > ele%value(l_active$)) then
+      dfield_computed = .true.
+      goto 8000  ! Zero field outside
+    endif
+
     phase = twopi * (ele%value(phi0$) + ele%value(phi0_err$) + ele%value(phi0_autoscale$))
     if (.not. bmad_com%absolute_time_tracking) then
       if (present(original_ele)) then
@@ -438,14 +448,6 @@ case (bmad_standard$)
     gradient = gradient * ele%value(l$) / ele%value(l_active$)
     omega = twopi * ele%value(rf_frequency$)
     k_wave = omega / c_light
-
-    s_active_offset = (ele%value(l$) - ele%value(l_active$)) / 2  ! Relative to entrance end of the cavity
-    s_eff = s_body - s_active_offset
-    if (s_eff < 0 .or. s_eff > ele%value(l_active$)) then
-      dfield_computed = .true.
-      goto 8000  ! Zero field outside
-    endif
-
     beta_start = ele%value(p0c_start$) / ele%value(e_tot_start$)
 
     if (present(rf_time)) then
@@ -1419,6 +1421,13 @@ case(fieldmap$)
 
         if (logic_option(.false., calc_potential)) then
           if (r /= 0) then
+            rb_ele => ele
+            rb_orb => local_orb
+            rb_grid => g_field_ptr
+            rb_expt = expt
+            rb_print_err = logic_option(.true., print_err)
+            rb_z = z
+
             abs_tol = abs(1e-10_rp * r * orbit%p0c * (1 + orbit%vec(6)) / (c_light * charge_of(ele%ref_species)))
             inte = super_qromb(rb_field, 0.0_rp, r, 1e-12_rp, abs_tol, 2, err) / r
             field%A(1:2) = field%A(1:2) + inte * [-y, x] / r
@@ -1524,7 +1533,7 @@ endif
 ! Final
 
 if (do_df_calc .and. .not. dfield_computed) then
-  call em_field_derivatives (ele, param, s_pos, orbit, .true., field, grid_allow_s_out_of_bounds, rf_time)
+  call em_field_derivatives (ele, param, s_pos, local_orb, .true., field, grid_allow_s_out_of_bounds, rf_time)
 endif
 
 if (.not. local_ref_frame) call convert_field_ele_to_lab (ele, s_body, .true., field, calc_dfield, calc_potential)
@@ -1532,28 +1541,6 @@ if (.not. local_ref_frame) call convert_field_ele_to_lab (ele, s_body, .true., f
 !----------------------------------------------------------------------------
 !----------------------------------------------------------------------------
 contains
-
-! Function for vector potential calc.
-
-function rb_field(x)
-
-real(rp), intent(in) :: x(:)
-real(rp) :: rb_field(size(x))
-integer i
-
-!
-
-do i = 1, size(x)
-  call grid_field_interpolate(ele, local_orb, g_field_ptr, g_pt, err, x(i), z, &
-              allow_s_out_of_bounds = .true., print_err = print_err)
-  rb_field(i) = x(i) * expt_ptr * g_pt%b(3)
-enddo
-
-end function rb_field
-
-!----------------------------------------------------------------------------
-!----------------------------------------------------------------------------
-! contains
 
 ! restore_curvilinear_field(field_a, field_b)
 !

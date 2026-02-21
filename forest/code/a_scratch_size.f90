@@ -34,7 +34,8 @@ module precision_constants
   ! double precision
   integer,parameter::sp=kind(1.e0)
   integer,parameter::dp=selected_real_kind(2*precision(1.e0))
-
+  !logical :: inside_gino=.false.,convert_to_bmad=.false.
+  logical :: convert_to_bmad=.true.
   ! quadrupole precision
   !  integer,parameter::sp=selected_real_kind(2*precision(1.e0))
   !  integer,parameter::dp=selected_real_kind(4*precision(1.e0))
@@ -208,7 +209,7 @@ module precision_constants
   DATA lielib_print /0,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,0/
   integer :: SECTOR_NMUL_MAX=22
   INTEGER, target :: SECTOR_NMUL = 11
- 
+  real(dp) ksroutine1
 !  integer, parameter :: no_e=5  !  electric 
   logical(lp) :: use_complex_in_ptc=.false.
   logical(lp) :: change_sector=my_true
@@ -602,7 +603,7 @@ do id=1,15
  write(6,*) id,wyoshid(id),wyoshik(id)
 enddo
 write(6,*) a,b
- stop
+ 
 endif
 
 ntl=10
@@ -638,8 +639,7 @@ do id=1,2*ntl+1
  write(6,*) id,wyoshids(id),wyoshiks(id)
 enddo
 write(6,*) a,b
- stop
-endif
+ endif
 !!!  rk6 in pancake
 butcher(1,1)=1.0_dp/9.0_dp
 butcher(2,1)=1.0_dp/24.0_dp

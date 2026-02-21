@@ -273,7 +273,7 @@ integer i, n, ie0, ibf, ief
 logical, optional :: print_err, force_calc
 logical calc_ok, err
 
-character(80) :: lines(10)
+character(200) :: lines(10)
 character(*), parameter :: r_name = "tao_lat_sigma_track"
 
 !
@@ -316,10 +316,10 @@ else
       ie0 = 0
       ele => branch%ele(0)
     else
-      beam_init = set_emit_from_beam_init(u%model_branch(0)%beam%beam_init, ele, ele%ref_species)
+      beam_init = beam_init_setup(u%model_branch(0)%beam%beam_init, ele, ele%ref_species)
     endif
   elseif (s%global%lat_sigma_calc_uses_emit_from == 'beam_init') then
-    beam_init = set_emit_from_beam_init(u%model_branch(0)%beam%beam_init, ele, ele%ref_species)
+    beam_init = beam_init_setup(u%model_branch(0)%beam%beam_init, ele, ele%ref_species)
   else
     call out_io (s_error$, r_name, 'Bad setting of global%lat_sigma_calc_uses_emit_from: ' // &
                                                                   s%global%lat_sigma_calc_uses_emit_from)
