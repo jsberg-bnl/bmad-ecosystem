@@ -513,16 +513,29 @@ SET (MASTER_INC_DIRS
 
 # If we use system HDF5 libraries, search for include directories
 find_package(HDF5 COMPONENTS Fortran HL)
-foreach(h5dir ${HDF5_Fortran_INCLUDE_DIRS})
-  list(FIND CMAKE_Fortran_IMPLICIT_INCLUDE_DIRECTORIES "${h5dir}" h5found)
-  if (h5found EQUAL -1)
-    list(APPEND MASTER_INC_DIRS "${h5dir}")
-  endif()
-endforeach()
 if (HDF5_FOUND)
-  list(FILTER HDF5_Fortran_HL_LIBRARIES EXCLUDE REGEX "-NOTFOUND$")
-  list(FILTER HDF5_Fortran_LIBRARIES EXCLUDE REGEX "-NOTFOUND$")
-  set(SHARED_LINK_LIBS ${HDF5_Fortran_HL_LIBRARIES} ${HDF5_Fortran_LIBRARIES} ${SHARED_LINK_LIBS})
+  if(ENABLE_SHARED OR ENABLE_SHARED_ONLY)
+    if(TARGET hdf5_hl_fortran-shared)
+      set(HDF5_TARGET hdf5_hl_fortran-shared)
+    elseif(TARGET hdf5_hl_fortran-static)
+      set(HDF5_TARGET hdf5_hl_fortran-static)
+    endif()
+  else()
+    if(TARGET hdf5_hl_fortran-static)
+      set(HDF5_TARGET hdf5_hl_fortran-static)
+    elseif(TARGET hdf5_hl_fortran-shared)
+      set(HDF5_TARGET hdf5_hl_fortran-shared)
+    endif()
+  endif()
+  if (NOT DEFINED HDF5_TARGET)
+    if(TARGET hdf5::hdf5_hl_fortran AND TARGET hdf5::hdf5_fortran)
+      set(HDF5_TARGET hdf5::hdf5_hl_fortran hdf5::hdf5_fortran)
+    else()
+      message(FATAL_ERROR "HDF5 Target not found")
+    endif()
+  endif()
+else()
+  message(FATAL_ERROR "HDF5 Target not found")
 endif()
 
 #------------------------------------------------------
@@ -687,7 +700,7 @@ IF (ENABLE_SHARED_ONLY AND CREATE_SHARED)
     ADD_LIBRARY (${LIBNAME} SHARED ${sources})
     LIST (APPEND TARGETS ${LIBNAME})
     SET_TARGET_PROPERTIES (${LIBNAME} PROPERTIES OUTPUT_NAME ${LIBNAME})
-    TARGET_LINK_LIBRARIES (${LIBNAME} ${SHARED_DEPS} ${SHARED_LINK_LIBS})
+    TARGET_LINK_LIBRARIES (${LIBNAME} ${SHARED_DEPS} ${SHARED_LINK_LIBS} ${HDF5_TARGET})
     DARWIN_SHARED ()
   ENDIF ()
 ELSE ()
@@ -695,6 +708,7 @@ ELSE ()
     ADD_LIBRARY (${LIBNAME} STATIC ${sources})
     LIST (APPEND TARGETS ${LIBNAME})
     SET_TARGET_PROPERTIES (${LIBNAME} PROPERTIES OUTPUT_NAME ${LIBNAME})
+    target_link_libraries(${LIBNAME} ${HDF5_TARGET})
   ENDIF ()
 ENDIF ()
 
@@ -733,7 +747,7 @@ IF (ENABLE_SHARED AND CREATE_SHARED AND NOT ENABLE_SHARED_ONLY)
 
   LIST (APPEND TARGETS ${LIBNAME}-shared)
   SET_TARGET_PROPERTIES (${LIBNAME}-shared PROPERTIES OUTPUT_NAME ${LIBNAME})
-  TARGET_LINK_LIBRARIES (${LIBNAME}-shared ${SHARED_DEPS} ${SHARED_LINK_LIBS})
+  TARGET_LINK_LIBRARIES (${LIBNAME}-shared ${SHARED_DEPS} ${SHARED_LINK_LIBS} ${HDF5_TARGET})
   DARWIN_SHARED ()
 ENDIF ()
 
@@ -1092,7 +1106,7 @@ foreach(exespec ${EXE_SPECS})
   TARGET_LINK_LIBRARIES(${EXENAME}-exe
     ${STATIC_FLAG} ${LINK_LIBS} 
     ${SHARED_FLAG} ${SHARED_LINK_LIBS} ${EXTRA_SHARED_LINK_LIBS}
-    ${X11_LIBRARIES} ${ACC_LINK_FLAGS} ${OPENMP_LINK_LIBS}
+    ${X11_LIBRARIES} ${ACC_LINK_FLAGS} ${OPENMP_LINK_LIBS} ${HDF5_TARGET}
     ${LINK_FLAGS} ${MAPLINE} ${IMPLICIT_LINKER_LIBRARIES}
     )
 
